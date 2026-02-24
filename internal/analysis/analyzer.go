@@ -209,6 +209,14 @@ var KnownTopLevel = map[string]bool{
 	"local_certs": true,
 }
 
+// SubDirectivesFor returns the set of valid subdirective names for parentName.
+// ok is false when the parent is unknown to the analyzer; the returned map is
+// nil when the body is freeform (no sub-directive validation applies).
+func SubDirectivesFor(parentName string) (subs map[string]bool, ok bool) {
+	subs, ok = knownSubDirectives[parentName]
+	return
+}
+
 // KnownGlobalOptions is the set of directives valid inside the global options block.
 // Source: https://caddyserver.com/docs/caddyfile/options
 var KnownGlobalOptions = map[string]bool{

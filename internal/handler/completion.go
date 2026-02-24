@@ -43,16 +43,15 @@ func (h *Handler) Completion(ctx *glsp.Context, params *protocol.CompletionParam
 		return empty, nil
 	}
 
-	// Use the AST to verify the cursor is at site-block level, not inside
-	// a directive body block (e.g. reverse_proxy { … } or tls { … }).
 	ast, _ := parser.Parse(content)
-	if !atSiteBlockLevel(ast, params.Position.Line) {
+	names := completionNamesAt(ast, params.Position.Line)
+	if names == nil {
 		return empty, nil
 	}
 
 	kind := protocol.CompletionItemKindKeyword
-	items := make([]protocol.CompletionItem, 0, len(topLevelDirectives))
-	for _, name := range topLevelDirectives {
+	items := make([]protocol.CompletionItem, 0, len(names))
+	for _, name := range names {
 		n := name
 		items = append(items, protocol.CompletionItem{
 			Label: n,
@@ -138,37 +137,45 @@ var containerDirectives = map[string]bool{
 	"route":         true,
 }
 
-// atSiteBlockLevel returns true when the cursor is at a position where a
-// top-level site-block directive is expected: either directly inside a site
-// block, or inside a container directive (handle, handle_path, route, …)
-// that accepts the same directive set.
-func atSiteBlockLevel(f *parser.File, cursorLine uint32) bool {
+// completionNamesAt returns the sorted list of names to complete at cursorLine,
+// or nil when the cursor is not in a completable position (outside all site
+// blocks, on an address line, or inside a freeform/unknown directive body).
+func completionNamesAt(f *parser.File, cursorLine uint32) []string {
 	for _, sb := range f.SiteBlocks {
 		if cursorLine <= sb.StartLine || cursorLine >= sb.EndLine {
 			continue
 		}
-		return atDirectiveListLevel(sb.Directives, cursorLine)
+		return directiveNamesAt(sb.Directives, cursorLine)
 	}
-	return false
+	return nil
 }
 
-// atDirectiveListLevel checks whether cursorLine is at the "top level" of a
-// directive list — not inside any directive's body — or inside a container
-// directive that recursively accepts the same directive set.
-func atDirectiveListLevel(directives []*parser.Directive, cursorLine uint32) bool {
+// directiveNamesAt walks a directive list and returns the names to complete at
+// cursorLine. It recurses into container directives and returns subdirective
+// names when the cursor is inside a directive with known subdirectives.
+func directiveNamesAt(directives []*parser.Directive, cursorLine uint32) []string {
 	for _, d := range directives {
 		if !hasBody(d) || cursorLine <= d.StartLine || cursorLine >= d.EndLine {
 			continue
 		}
 		// Cursor is inside this directive's body block.
 		if containerDirectives[d.Name.Value] {
-			// Container: recurse to check the inner directive list.
-			return atDirectiveListLevel(d.Body, cursorLine)
+			return directiveNamesAt(d.Body, cursorLine)
 		}
-		return false
+		subDirs, known := analysis.SubDirectivesFor(d.Name.Value)
+		if !known || subDirs == nil {
+			// Unknown or freeform directive — no completions.
+			return nil
+		}
+		names := make([]string, 0, len(subDirs))
+		for name := range subDirs {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return names
 	}
-	// Cursor is not inside any directive body → at the top level of this list.
-	return true
+	// Not inside any directive body → site-block level.
+	return topLevelDirectives
 }
 
 // hasBody reports whether d has a body block (EndLine > StartLine),

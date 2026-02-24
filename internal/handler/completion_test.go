@@ -67,85 +67,127 @@ func TestAtFirstTokenPosition_LineOutOfBounds(t *testing.T) {
 	}
 }
 
-// --- atSiteBlockLevel --------------------------------------------------------
+// --- completionNamesAt -------------------------------------------------------
 
-func TestAtSiteBlockLevel_InsideSiteBlock(t *testing.T) {
+func TestCompletionNamesAt_InsideSiteBlock(t *testing.T) {
 	src := "example.com {\n    reverse_proxy localhost\n}\n"
 	f := parseAST(src)
-	if !atSiteBlockLevel(f, 1) {
-		t.Error("line inside site block: want true")
+	names := completionNamesAt(f, 1)
+	if names == nil {
+		t.Fatal("line inside site block: want top-level directives, got nil")
 	}
+	for _, n := range names {
+		if n == "reverse_proxy" {
+			return
+		}
+	}
+	t.Errorf("expected 'reverse_proxy' in site-block completions, got %v", names)
 }
 
-func TestAtSiteBlockLevel_OutsideAllBlocks(t *testing.T) {
+func TestCompletionNamesAt_OutsideAllBlocks(t *testing.T) {
 	src := "example.com {\n    reverse_proxy localhost\n}\n"
 	f := parseAST(src)
 	// Line 3 is beyond the closing brace on line 2.
-	if atSiteBlockLevel(f, 3) {
-		t.Error("line outside all site blocks: want false")
+	if completionNamesAt(f, 3) != nil {
+		t.Error("line outside all site blocks: want nil")
 	}
 }
 
-func TestAtSiteBlockLevel_OnAddressLine(t *testing.T) {
+func TestCompletionNamesAt_OnAddressLine(t *testing.T) {
 	src := "example.com {\n    respond \"ok\"\n}\n"
 	f := parseAST(src)
-	// Line 0 is the address+brace line; atSiteBlockLevel should return false because
-	// cursorLine (0) == sb.StartLine (0) and the check is cursorLine <= sb.StartLine.
-	if atSiteBlockLevel(f, 0) {
-		t.Error("cursor on address line: want false")
+	// Line 0 is the address+brace line — not inside the block.
+	if completionNamesAt(f, 0) != nil {
+		t.Error("cursor on address line: want nil")
 	}
 }
 
-func TestAtSiteBlockLevel_InsideNonContainerBody(t *testing.T) {
-	// reverse_proxy is NOT a container — its body is for sub-directives only.
+func TestCompletionNamesAt_InsideNonContainerBody(t *testing.T) {
+	// Cursor inside reverse_proxy block should yield its subdirectives.
 	src := "example.com {\n    reverse_proxy {\n        to localhost\n    }\n}\n"
 	f := parseAST(src)
-	// Line 2 is inside the reverse_proxy block.
-	if atSiteBlockLevel(f, 2) {
-		t.Error("line inside reverse_proxy body: want false")
+	names := completionNamesAt(f, 2)
+	if names == nil {
+		t.Fatal("line inside reverse_proxy body: want subdirectives, got nil")
+	}
+	for _, n := range names {
+		if n == "to" {
+			return
+		}
+	}
+	t.Errorf("expected 'to' in reverse_proxy subdirectives, got %v", names)
+}
+
+func TestCompletionNamesAt_InsideFreeformBody(t *testing.T) {
+	// basicauth has a freeform (nil) body — no completions.
+	src := "example.com {\n    basicauth {\n        user $2a$...\n    }\n}\n"
+	f := parseAST(src)
+	if completionNamesAt(f, 2) != nil {
+		t.Error("line inside basicauth (freeform) body: want nil")
 	}
 }
 
-func TestAtSiteBlockLevel_InsideHandleContainer(t *testing.T) {
+func TestCompletionNamesAt_InsideHandleContainer(t *testing.T) {
 	src := "example.com {\n    handle /api/* {\n        reverse_proxy localhost\n    }\n}\n"
 	f := parseAST(src)
-	// Line 2 is inside handle { }, which is a container directive.
-	if !atSiteBlockLevel(f, 2) {
-		t.Error("line inside handle body: want true")
+	names := completionNamesAt(f, 2)
+	if names == nil {
+		t.Fatal("line inside handle body: want top-level directives, got nil")
 	}
+	for _, n := range names {
+		if n == "reverse_proxy" {
+			return
+		}
+	}
+	t.Errorf("expected 'reverse_proxy' in handle container completions, got %v", names)
 }
 
-func TestAtSiteBlockLevel_InsideRouteContainer(t *testing.T) {
+func TestCompletionNamesAt_InsideRouteContainer(t *testing.T) {
 	src := "example.com {\n    route {\n        file_server\n    }\n}\n"
 	f := parseAST(src)
-	if !atSiteBlockLevel(f, 2) {
-		t.Error("line inside route body: want true")
+	if completionNamesAt(f, 2) == nil {
+		t.Error("line inside route body: want top-level directives, got nil")
 	}
 }
 
-func TestAtSiteBlockLevel_InsideHandleErrorsContainer(t *testing.T) {
+func TestCompletionNamesAt_InsideHandleErrorsContainer(t *testing.T) {
 	src := "example.com {\n    handle_errors {\n        respond \"error\" 500\n    }\n}\n"
 	f := parseAST(src)
-	if !atSiteBlockLevel(f, 2) {
-		t.Error("line inside handle_errors body: want true")
+	if completionNamesAt(f, 2) == nil {
+		t.Error("line inside handle_errors body: want top-level directives, got nil")
 	}
 }
 
-func TestAtSiteBlockLevel_NestedContainer(t *testing.T) {
+func TestCompletionNamesAt_NestedContainer(t *testing.T) {
 	// handle inside handle — both are containers.
 	src := "example.com {\n    handle {\n        handle /inner/* {\n            respond \"inner\"\n        }\n    }\n}\n"
 	f := parseAST(src)
 	// Line 3 is inside the inner handle block.
-	if !atSiteBlockLevel(f, 3) {
-		t.Error("line inside nested handle body: want true")
+	if completionNamesAt(f, 3) == nil {
+		t.Error("line inside nested handle body: want top-level directives, got nil")
 	}
 }
 
-func TestAtSiteBlockLevel_EmptyFile(t *testing.T) {
+func TestCompletionNamesAt_EmptyFile(t *testing.T) {
 	f := parseAST("")
-	if atSiteBlockLevel(f, 0) {
-		t.Error("empty file: want false")
+	if completionNamesAt(f, 0) != nil {
+		t.Error("empty file: want nil")
 	}
+}
+
+func TestCompletionNamesAt_TLSSubdirectives(t *testing.T) {
+	src := "example.com {\n    tls {\n        \n    }\n}\n"
+	f := parseAST(src)
+	names := completionNamesAt(f, 2)
+	if names == nil {
+		t.Fatal("line inside tls body: want subdirectives, got nil")
+	}
+	for _, n := range names {
+		if n == "protocols" {
+			return
+		}
+	}
+	t.Errorf("expected 'protocols' in tls subdirectives, got %v", names)
 }
 
 // --- importArgPrefix ---------------------------------------------------------
