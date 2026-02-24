@@ -155,6 +155,120 @@ func TestAnalyze_GlobalAndSiteErrors(t *testing.T) {
 	}
 }
 
+// --- subdirective body validation --------------------------------------------
+
+func TestAnalyze_ValidSubDirective_NoWarning(t *testing.T) {
+	cases := []struct {
+		parent string
+		sub    string
+	}{
+		{"reverse_proxy", "to localhost:8080"},
+		{"reverse_proxy", "lb_policy round_robin"},
+		{"reverse_proxy", "health_uri /healthz"},
+		{"tls", "protocols tls1.2 tls1.3"},
+		{"tls", "ciphers TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"},
+		{"encode", "gzip"},
+		{"encode", "zstd"},
+		{"log", "output file /var/log/access.log"},
+		{"log", "level DEBUG"},
+		{"file_server", "root /var/www"},
+		{"file_server", "browse"},
+		{"php_fastcgi", "root /var/www/php"},
+		{"request_body", "max_size 10MB"},
+		{"forward_auth", "uri https://auth.example.com/check"},
+		{"tracing", "span my-span"},
+	}
+	for _, tc := range cases {
+		src := "example.com {\n\t" + tc.parent + " {\n\t\t" + tc.sub + "\n\t}\n}\n"
+		diags := analyze(src)
+		if len(diags) != 0 {
+			t.Errorf("%s > %s: expected no diagnostics, got %d: %v", tc.parent, tc.sub, len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_InvalidSubDirective_Warning(t *testing.T) {
+	cases := []struct {
+		parent string
+		badSub string
+	}{
+		{"reverse_proxy", "totally_invalid_sub"},
+		{"tls", "not_a_tls_option"},
+		{"encode", "deflate"},
+		{"log", "unknown_log_setting"},
+		{"file_server", "bad_fs_sub"},
+		{"php_fastcgi", "nonexistent"},
+		{"request_body", "invalid"},
+		{"forward_auth", "bad_sub"},
+		{"tracing", "not_a_span"},
+	}
+	for _, tc := range cases {
+		src := "example.com {\n\t" + tc.parent + " {\n\t\t" + tc.badSub + "\n\t}\n}\n"
+		diags := analyze(src)
+		if len(diags) != 1 {
+			t.Errorf("%s > %s: expected 1 diagnostic, got %d: %v", tc.parent, tc.badSub, len(diags), diags)
+			continue
+		}
+		if !hasMsg(diags, `"`+tc.badSub+`"`, tc.parent) {
+			t.Errorf("%s > %s: diagnostic message should name both the subdirective and parent, got: %q",
+				tc.parent, tc.badSub, diags[0].Message)
+		}
+	}
+}
+
+func TestAnalyze_ContainerDirective_ValidContents(t *testing.T) {
+	for _, container := range []string{"handle", "handle_errors", "handle_path", "route"} {
+		src := "example.com {\n\t" + container + " {\n\t\treverse_proxy localhost:8080\n\t}\n}\n"
+		diags := analyze(src)
+		if len(diags) != 0 {
+			t.Errorf("%s with valid site directive: expected no diagnostics, got %d: %v", container, len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_ContainerDirective_InvalidContents(t *testing.T) {
+	for _, container := range []string{"handle", "handle_errors", "route"} {
+		src := "example.com {\n\t" + container + " {\n\t\tnot_a_directive\n\t}\n}\n"
+		diags := analyze(src)
+		if len(diags) != 1 {
+			t.Errorf("%s with invalid directive: expected 1 diagnostic, got %d: %v", container, len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_FreeformBody_NoWarning(t *testing.T) {
+	// basicauth, header, map have freeform bodies that must not be validated.
+	cases := []string{
+		"example.com {\n\tbasicauth {\n\t\tBob $2y$10$abc\n\t}\n}\n",
+		"example.com {\n\theader {\n\t\tX-Custom-Header value\n\t\t-X-Remove-Me\n\t}\n}\n",
+		"example.com {\n\tmap {path} {output} {\n\t\t/foo bar\n\t\tdefault baz\n\t}\n}\n",
+	}
+	for _, src := range cases {
+		diags := analyze(src)
+		if len(diags) != 0 {
+			t.Errorf("freeform body should not produce diagnostics, got %d: %v", len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_ImportInSubDirectiveBody_NoWarning(t *testing.T) {
+	// import is valid anywhere in a Caddyfile, including inside directive bodies.
+	src := "example.com {\n\treverse_proxy {\n\t\timport my_snippet\n\t\tto localhost:8080\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 0 {
+		t.Errorf("import in directive body: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_MatcherInSubDirectiveBody_NoWarning(t *testing.T) {
+	// @matcher declarations inside a container directive body must not be flagged.
+	src := "example.com {\n\thandle {\n\t\t@api path /api/*\n\t\treverse_proxy @api localhost:8080\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 0 {
+		t.Errorf("matcher in container body: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
 // --- KnownTopLevel / KnownGlobalOptions maps ----------------------------------
 
 func TestKnownTopLevel_NotEmpty(t *testing.T) {
