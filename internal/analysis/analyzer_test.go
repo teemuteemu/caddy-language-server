@@ -78,11 +78,48 @@ func TestAnalyze_NamedMatcherNoWarning(t *testing.T) {
 	}
 }
 
-func TestAnalyze_SnippetBlockSkipped(t *testing.T) {
-	// Snippet bodies can contain arbitrary sub-directives; they must not be validated.
+func TestAnalyze_SnippetBody_Validated(t *testing.T) {
+	// Truly unknown directives (not in KnownTopLevel and not in knownSubDirectiveParent)
+	// must still be flagged inside snippets.
 	diags := analyze("(mysnippet) {\n\tunknown_directive\n\tanother_bad_one baz\n}\n")
+	if len(diags) != 2 {
+		t.Errorf("expected 2 diagnostics for unknown directives in snippet, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_SnippetBody_ValidDirective_NoWarning(t *testing.T) {
+	diags := analyze("(mysnippet) {\n\treverse_proxy localhost:8080\n}\n")
 	if len(diags) != 0 {
-		t.Errorf("expected no diagnostics for snippet block, got %d: %v", len(diags), diags)
+		t.Errorf("valid directive in snippet: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_SnippetBody_SubDirectiveLevelTokens_NoWarning(t *testing.T) {
+	// Snippets may be imported inside a parent directive block (e.g. reverse_proxy),
+	// so subdirective-level tokens must not produce "must appear inside X" warnings.
+	cases := []string{
+		"transport", "header_up", "header_down", "lb_policy", "health_uri",
+		"protocols", "ciphers", "alpn",
+		"gzip", "zstd",
+		"output", "format", "level",
+	}
+	for _, sub := range cases {
+		src := "(mysnippet) {\n\t" + sub + "\n}\n"
+		diags := analyze(src)
+		if len(diags) != 0 {
+			t.Errorf("snippet with subdirective token %q: expected no diagnostics, got %d: %v", sub, len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_SiteLevel_SubDirectivePlacementHint_StillWorks(t *testing.T) {
+	// Outside a snippet the placement hint must still fire.
+	diags := analyze("example.com {\n\ttransport http\n}\n")
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "transport", "reverse_proxy") {
+		t.Errorf("expected placement hint, got: %q", diags[0].Message)
 	}
 }
 
@@ -251,14 +288,24 @@ func TestAnalyze_FreeformBody_NoWarning(t *testing.T) {
 	}
 }
 
-func TestAnalyze_ImportInSubDirectiveBody_NoWarning(t *testing.T) {
-	// import inside a non-container directive body (e.g. reverse_proxy) is
-	// allowed without snippet validation to avoid false positives when the
-	// snippet is defined in an external file.
-	src := "example.com {\n\treverse_proxy {\n\t\timport my_snippet\n\t\tto localhost:8080\n\t}\n}\n"
+func TestAnalyze_ImportInSubDirectiveBody_DefinedSnippet_NoWarning(t *testing.T) {
+	// import inside a non-container directive body is valid when the snippet exists.
+	src := "(my_snippet) {\n\theader_up X-Foo bar\n}\nexample.com {\n\treverse_proxy {\n\t\timport my_snippet\n\t\tto localhost:8080\n\t}\n}\n"
 	diags := analyze(src)
 	if len(diags) != 0 {
-		t.Errorf("import in directive body: expected no diagnostics, got %d: %v", len(diags), diags)
+		t.Errorf("import of defined snippet in directive body: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_ImportInSubDirectiveBody_UndefinedSnippet_Warning(t *testing.T) {
+	// import inside a non-container directive body flags an undefined snippet.
+	src := "example.com {\n\treverse_proxy {\n\t\timport ghost\n\t\tto localhost:8080\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 1 {
+		t.Fatalf("import of undefined snippet in directive body: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "ghost") {
+		t.Errorf("diagnostic should name the undefined snippet, got: %q", diags[0].Message)
 	}
 }
 

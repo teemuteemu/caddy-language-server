@@ -325,11 +325,13 @@ func Analyze(f *parser.File) []protocol.Diagnostic {
 	}
 
 	for _, sb := range f.SiteBlocks {
-		if isSnippet(sb) {
-			continue
-		}
+		// Snippets can be imported at any nesting level (e.g. inside a
+		// reverse_proxy block), so their bodies may legitimately contain
+		// subdirective-level tokens. Pass inSnippet=true to suppress the
+		// "must appear inside X" placement hint for those tokens.
+		inSnippet := isSnippet(sb)
 		for _, d := range sb.Directives {
-			diags = append(diags, a.analyzeSiteDirective(d)...)
+			diags = append(diags, a.analyzeSiteDirective(d, inSnippet)...)
 		}
 	}
 
@@ -355,7 +357,11 @@ func (a *analyzer) analyzeGlobalDirective(d *parser.Directive) []protocol.Diagno
 	return nil
 }
 
-func (a *analyzer) analyzeSiteDirective(d *parser.Directive) []protocol.Diagnostic {
+// analyzeSiteDirective validates a directive at site-block (or snippet) level.
+// inSnippet is true when the directive is inside a snippet definition; in that
+// case known subdirective tokens (e.g. "transport", "header_up") are silently
+// accepted because the snippet may be imported inside their parent directive.
+func (a *analyzer) analyzeSiteDirective(d *parser.Directive, inSnippet bool) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
 
 	name := d.Name.Value
@@ -364,6 +370,13 @@ func (a *analyzer) analyzeSiteDirective(d *parser.Directive) []protocol.Diagnost
 		return diags
 	}
 	if !KnownTopLevel[name] {
+		// Inside a snippet we don't know the import context, so a token that
+		// belongs to a known parent directive is accepted without complaint.
+		if inSnippet {
+			if _, ok := knownSubDirectiveParent[name]; ok {
+				return diags
+			}
+		}
 		var msg string
 		if parent, ok := knownSubDirectiveParent[name]; ok {
 			msg = fmt.Sprintf("%q must appear inside a %q block, not at the site level", name, parent)
@@ -387,12 +400,12 @@ func (a *analyzer) analyzeSiteDirective(d *parser.Directive) []protocol.Diagnost
 	}
 
 	// Validate subdirectives inside the body block.
-	diags = append(diags, a.analyzeDirectiveBody(name, d.Body)...)
+	diags = append(diags, a.analyzeDirectiveBody(name, d.Body, inSnippet)...)
 	return diags
 }
 
 // analyzeDirectiveBody validates the subdirectives inside a directive's body block.
-func (a *analyzer) analyzeDirectiveBody(parentName string, body []*parser.Directive) []protocol.Diagnostic {
+func (a *analyzer) analyzeDirectiveBody(parentName string, body []*parser.Directive, inSnippet bool) []protocol.Diagnostic {
 	if len(body) == 0 {
 		return nil
 	}
@@ -401,7 +414,7 @@ func (a *analyzer) analyzeDirectiveBody(parentName string, body []*parser.Direct
 	if containerDirectives[parentName] {
 		var diags []protocol.Diagnostic
 		for _, sub := range body {
-			diags = append(diags, a.analyzeSiteDirective(sub)...)
+			diags = append(diags, a.analyzeSiteDirective(sub, inSnippet)...)
 		}
 		return diags
 	}
@@ -416,8 +429,13 @@ func (a *analyzer) analyzeDirectiveBody(parentName string, body []*parser.Direct
 	var diags []protocol.Diagnostic
 	for _, sub := range body {
 		subName := sub.Name.Value
-		// Matcher declarations and import are always valid inside any block.
-		if strings.HasPrefix(subName, "@") || subName == "import" {
+		// Matcher declarations are always valid inside any block.
+		if strings.HasPrefix(subName, "@") {
+			continue
+		}
+		// import is valid anywhere; validate its snippet reference.
+		if subName == "import" {
+			diags = append(diags, a.analyzeImport(sub)...)
 			continue
 		}
 		if !subDirs[subName] {
