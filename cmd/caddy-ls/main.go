@@ -8,7 +8,7 @@ import (
 	"caddy-ls/internal/server"
 )
 
-const appVersion = "0.0.1"
+var appVersion = "dev"
 
 func main() {
 	var (
