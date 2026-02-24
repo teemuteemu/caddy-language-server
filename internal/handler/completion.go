@@ -1,35 +1,25 @@
 package handler
 
 import (
+	"caddy-ls/internal/analysis"
 	"caddy-ls/internal/parser"
+	"sort"
 	"strings"
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
-// topLevelDirectives are the completion items offered at the top level of a site block.
-var topLevelDirectives = []string{
-	"http",
-	"https",
-	"tls",
-	"reverse_proxy",
-	"file_server",
-	"encode",
-	"log",
-	"header",
-	"root",
-	"php_fastcgi",
-	"redir",
-	"rewrite",
-	"respond",
-	"route",
-	"handle",
-	"handle_path",
-	"handle_errors",
-	"basicauth",
-	"templates",
-}
+// topLevelDirectives is built from the authoritative KnownTopLevel set so that
+// completion items are always in sync with the analyzer's validation rules.
+var topLevelDirectives = func() []string {
+	names := make([]string, 0, len(analysis.KnownTopLevel))
+	for name := range analysis.KnownTopLevel {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}()
 
 // Completion handles textDocument/completion.
 func (h *Handler) Completion(ctx *glsp.Context, params *protocol.CompletionParams) (any, error) {

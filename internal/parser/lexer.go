@@ -2,7 +2,8 @@ package parser
 
 import (
 	"strings"
-	"unicode"
+
+	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 )
 
 // TokenType enumerates all token kinds.
@@ -11,11 +12,11 @@ type TokenType int
 const (
 	ILLEGAL TokenType = iota
 	EOF
-	IDENT   // any unquoted word / address
+	IDENT   // any unquoted word / address / directive name
 	LBRACE  // {
 	RBRACE  // }
-	NEWLINE // \n (used to track line boundaries)
-	COMMENT // # …
+	NEWLINE // retained for enum compatibility; not produced by Caddy's tokenizer
+	COMMENT // retained for enum compatibility; not produced by Caddy's tokenizer
 	STRING  // "…" or `…`
 )
 
@@ -40,168 +41,149 @@ func (t TokenType) String() string {
 	}
 }
 
-// Lexer tokenizes a Caddyfile source string.
-type Lexer struct {
-	src    []rune
-	pos    int
-	line   uint32
-	char   uint32
-	tokens []Token
+// buildLineStarts returns a slice where lineStarts[i] is the byte offset of
+// the first character of line i (0-based) within src.
+func buildLineStarts(src string) []int {
+	starts := []int{0}
+	for i := 0; i < len(src); i++ {
+		if src[i] == '\n' {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
 }
 
-// Tokenize returns all tokens for src.
+// Tokenize uses Caddy's official Caddyfile tokenizer and enriches each token
+// with column information derived by scanning the source text.
+//
+// Note: COMMENT and NEWLINE tokens are not produced because Caddy's tokenizer
+// strips comments and does not emit newlines as separate tokens. The NEWLINE
+// and COMMENT enum values are retained for backward compatibility only.
 func Tokenize(src string) []Token {
-	l := &Lexer{src: []rune(src)}
-	l.run()
-	return l.tokens
+	caddyTokens, err := caddyfile.Tokenize([]byte(src), "Caddyfile")
+	if err != nil {
+		// Return just an EOF so the parser can report errors gracefully.
+		return []Token{{Type: EOF}}
+	}
+	return addColumns(src, caddyTokens)
 }
 
-func (l *Lexer) run() {
-	for l.pos < len(l.src) {
-		ch := l.src[l.pos]
+// addColumns converts a slice of Caddy tokens into our internal Token slice,
+// computing a column position for each token by scanning the source text in
+// forward order.
+//
+// Caddy's Token carries only a line number (1-based). We find the column by
+// searching for the token's text forward from the end of the last token on the
+// same line, starting at least from the line's first byte. This correctly
+// handles duplicate tokens on the same line and skips over comment text that
+// Caddy has already stripped from the token stream.
+func addColumns(src string, caddyTokens []caddyfile.Token) []Token {
+	lineStarts := buildLineStarts(src)
+	result := make([]Token, 0, len(caddyTokens)+1)
 
-		switch {
-		case ch == '\n':
-			l.emit(NEWLINE, "\n")
-			l.pos++
-			l.line++
-			l.char = 0
+	// lineEnd[line0] is the byte offset just past the end of the last token
+	// we matched on line0. Used to avoid re-matching an earlier occurrence of
+	// the same text.
+	lineEnd := make(map[uint32]int)
 
-		case ch == '\r':
-			l.pos++
-			// skip bare \r
-
-		case ch == '{':
-			if l.isPlaceholder() {
-				l.lexIdent()
-			} else {
-				l.emit(LBRACE, "{")
-				l.pos++
-				l.char++
-			}
-
-		case ch == '}':
-			l.emit(RBRACE, "}")
-			l.pos++
-			l.char++
-
-		case ch == '#':
-			l.lexComment()
-
-		case ch == '"' || ch == '`':
-			l.lexQuoted(ch)
-
-		case unicode.IsSpace(ch):
-			l.pos++
-			l.char++
-
-		default:
-			l.lexIdent()
+	for _, ct := range caddyTokens {
+		if ct.Line <= 0 {
+			continue
 		}
-	}
-	l.emit(EOF, "")
-}
+		line0 := uint32(ct.Line - 1) // Caddy is 1-based; we are 0-based
 
-func (l *Lexer) emit(t TokenType, value string) {
-	l.tokens = append(l.tokens, Token{
-		Type:  t,
-		Value: value,
-		Line:  l.line,
-		Char:  l.char,
-	})
-}
-
-func (l *Lexer) lexComment() {
-	start := l.pos
-	startChar := l.char
-	for l.pos < len(l.src) && l.src[l.pos] != '\n' {
-		l.pos++
-	}
-	value := string(l.src[start:l.pos])
-	l.tokens = append(l.tokens, Token{
-		Type:  COMMENT,
-		Value: value,
-		Line:  l.line,
-		Char:  startChar,
-	})
-	l.char += uint32(len([]rune(value)))
-}
-
-func (l *Lexer) lexQuoted(quote rune) {
-	startLine := l.line
-	startChar := l.char
-	l.pos++ // consume opening quote
-	l.char++
-	var sb strings.Builder
-	sb.WriteRune(quote)
-	for l.pos < len(l.src) {
-		ch := l.src[l.pos]
-		sb.WriteRune(ch)
-		l.pos++
-		if ch == '\n' {
-			l.line++
-			l.char = 0
-		} else {
-			l.char++
+		lineStart := 0
+		if int(line0) < len(lineStarts) {
+			lineStart = lineStarts[line0]
 		}
-		if ch == quote {
-			break
+
+		// Search starts at the line start or after the previous token on this
+		// line, whichever is later.
+		searchFrom := lineStart
+		if prev, ok := lineEnd[line0]; ok && prev > searchFrom {
+			searchFrom = prev
 		}
-	}
-	l.tokens = append(l.tokens, Token{
-		Type:  STRING,
-		Value: sb.String(),
-		Line:  startLine,
-		Char:  startChar,
-	})
-}
 
-// isPlaceholder reports whether the '{' at l.pos is the start of a Caddy
-// placeholder like {$VAR} or {http.request.uri} rather than a block brace.
-// A placeholder has a non-whitespace, non-brace character immediately after '{'.
-func (l *Lexer) isPlaceholder() bool {
-	if l.pos+1 >= len(l.src) {
-		return false
-	}
-	next := l.src[l.pos+1]
-	return next != '{' && next != '}' && next != '\n' && next != '\r' && !unicode.IsSpace(next)
-}
+		var (
+			tt    TokenType
+			value string
+			col   uint32
+		)
 
-func (l *Lexer) lexIdent() {
-	start := l.pos
-	startChar := l.char
-	for l.pos < len(l.src) {
-		ch := l.src[l.pos]
-		if ch == '{' {
-			if l.isPlaceholder() {
-				// Consume the embedded placeholder {…} as part of this token.
-				l.pos++ // consume '{'
-				for l.pos < len(l.src) {
-					c := l.src[l.pos]
-					if c == '}' {
-						l.pos++ // consume '}'
-						break
-					}
-					if c == '\n' || c == '\r' {
-						break // malformed placeholder; stop consuming
-					}
-					l.pos++
+		if ct.Quoted() {
+			tt = STRING
+			// Locate the opening quote (or heredoc marker) in the source.
+			qpos := -1
+			for i := searchFrom; i < len(src); i++ {
+				ch := src[i]
+				if ch == '"' || ch == '`' {
+					qpos = i
+					break
 				}
-				continue
+				// Heredoc: << marker
+				if ch == '<' && i+1 < len(src) && src[i+1] == '<' {
+					qpos = i
+					break
+				}
 			}
-			break
+
+			if qpos >= 0 {
+				col = uint32(qpos - lineStart)
+				if src[qpos] == '<' {
+					// Heredoc: value is just the opening <<MARKER line.
+					end := qpos
+					for end < len(src) && src[end] != '\n' {
+						end++
+					}
+					value = src[qpos:end]
+					lineEnd[line0] = end
+				} else {
+					// Regular quoted string: read through matching closing quote.
+					q := src[qpos]
+					end := qpos + 1
+					for end < len(src) && src[end] != q {
+						if src[end] == '\n' {
+							break // unterminated; stop at newline
+						}
+						end++
+					}
+					if end < len(src) && src[end] == q {
+						end++ // include closing quote
+					}
+					value = src[qpos:end]
+					lineEnd[line0] = end
+				}
+			} else {
+				// Fallback: reconstruct a quoted value from the token text.
+				value = `"` + ct.Text + `"`
+			}
+		} else {
+			switch ct.Text {
+			case "{":
+				tt = LBRACE
+			case "}":
+				tt = RBRACE
+			default:
+				tt = IDENT
+			}
+			value = ct.Text
+
+			idx := strings.Index(src[searchFrom:], ct.Text)
+			if idx >= 0 {
+				absPos := searchFrom + idx
+				col = uint32(absPos - lineStart)
+				lineEnd[line0] = absPos + len(ct.Text)
+			}
 		}
-		if ch == '}' || ch == '\n' || ch == '\r' || unicode.IsSpace(ch) {
-			break
-		}
-		l.pos++
+
+		result = append(result, Token{
+			Type:  tt,
+			Value: value,
+			Line:  line0,
+			Char:  col,
+		})
 	}
-	value := string(l.src[start:l.pos])
-	l.tokens = append(l.tokens, Token{
-		Type:  IDENT,
-		Value: value,
-		Line:  l.line,
-		Char:  startChar,
-	})
-	l.char += uint32(len([]rune(value)))
+
+	result = append(result, Token{Type: EOF})
+	return result
 }

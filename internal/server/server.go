@@ -35,20 +35,17 @@ func Run(logLevel string) error {
 }
 
 func configureLogging(level string) {
-	var logLevel commonlog.Level
+	// commonlog.Configure verbosity: 1=Error, 2=Warning, 3=Notice, 4=Info, 5=Debug
+	verbosity := 2 // Warning by default
 	switch level {
 	case "debug":
-		logLevel = commonlog.Debug
+		verbosity = 5
 	case "info":
-		logLevel = commonlog.Info
+		verbosity = 4
 	case "warning", "warn":
-		logLevel = commonlog.Warning
+		verbosity = 2
 	case "error":
-		logLevel = commonlog.Error
-	default:
-		logLevel = commonlog.Warning
+		verbosity = 1
 	}
-
-	commonlog.Configure(1, nil)
-	_ = logLevel
+	commonlog.Configure(verbosity, nil)
 }

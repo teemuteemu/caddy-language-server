@@ -38,33 +38,33 @@ var knownSubDirectiveParent = map[string]string{
 	"handle_response":   "reverse_proxy",
 	"replace_status":    "reverse_proxy",
 	// tls sub-directives
-	"protocols":         "tls",
-	"ciphers":           "tls",
-	"curves":            "tls",
-	"alpn":              "tls",
-	"load":              "tls",
-	"ca":                "tls",
-	"ca_root":           "tls",
-	"key_type":          "tls",
-	"dns":               "tls",
-	"resolvers":         "tls",
-	"eab":               "tls",
-	"on_demand":         "tls",
-	"client_auth":       "tls",
-	"get_certificate":   "tls",
+	"protocols":       "tls",
+	"ciphers":         "tls",
+	"curves":          "tls",
+	"alpn":            "tls",
+	"load":            "tls",
+	"ca":              "tls",
+	"ca_root":         "tls",
+	"key_type":        "tls",
+	"dns":             "tls",
+	"resolvers":       "tls",
+	"eab":             "tls",
+	"on_demand":       "tls",
+	"client_auth":     "tls",
+	"get_certificate": "tls",
 	// encode sub-directives
-	"gzip":  "encode",
-	"zstd":  "encode",
-	"br":    "encode",
+	"gzip": "encode",
+	"zstd": "encode",
+	"br":   "encode",
 	// log sub-directives
 	"output": "log",
 	"format": "log",
 	"level":  "log",
 }
 
-// knownTopLevel is the set of directives valid at the site-block level.
+// KnownTopLevel is the set of directives valid at the site-block level.
 // Source: https://caddyserver.com/docs/caddyfile/directives
-var knownTopLevel = map[string]bool{
+var KnownTopLevel = map[string]bool{
 	// Core / routing
 	"abort":          true,
 	"error":          true,
@@ -116,9 +116,39 @@ var knownTopLevel = map[string]bool{
 	"local_certs": true,
 }
 
-func severityError() *protocol.DiagnosticSeverity {
-	s := protocol.DiagnosticSeverityError
-	return &s
+// KnownGlobalOptions is the set of directives valid inside the global options block.
+// Source: https://caddyserver.com/docs/caddyfile/options
+var KnownGlobalOptions = map[string]bool{
+	"debug":              true,
+	"http_port":          true,
+	"https_port":         true,
+	"default_bind":       true,
+	"grace_period":       true,
+	"shutdown_delay":     true,
+	"admin":              true,
+	"on_demand_tls":      true,
+	"storage":            true,
+	"acme_ca":            true,
+	"acme_ca_root":       true,
+	"acme_dns":           true,
+	"acme_eab":           true,
+	"cert_issuer":        true,
+	"skip_install_trust": true,
+	"email":              true,
+	"ocsp_stapling":      true,
+	"ocsp_interval":      true,
+	"preferred_chains":   true,
+	"key_type":           true,
+	"auto_https":         true,
+	"metrics":            true,
+	"tracing":            true,
+	"servers":            true,
+	"log":                true,
+	"order":              true,
+	"local_certs":        true,
+	"persist_config":     true,
+	"pki":                true,
+	"import":             true,
 }
 
 func severityWarning() *protocol.DiagnosticSeverity {
@@ -137,19 +167,42 @@ func isSnippet(sb *parser.SiteBlock) bool {
 func Analyze(f *parser.File) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
 
+	if f.GlobalBlock != nil {
+		for _, d := range f.GlobalBlock.Directives {
+			diags = append(diags, analyzeGlobalDirective(d)...)
+		}
+	}
+
 	for _, sb := range f.SiteBlocks {
 		if isSnippet(sb) {
 			continue
 		}
 		for _, d := range sb.Directives {
-			diags = append(diags, analyzeDirective(d)...)
+			diags = append(diags, analyzeSiteDirective(d)...)
 		}
 	}
 
 	return diags
 }
 
-func analyzeDirective(d *parser.Directive) []protocol.Diagnostic {
+func analyzeGlobalDirective(d *parser.Directive) []protocol.Diagnostic {
+	name := d.Name.Value
+	if strings.HasPrefix(name, "@") {
+		return nil
+	}
+	if !KnownGlobalOptions[name] {
+		msg := fmt.Sprintf("unknown global option %q", name)
+		return []protocol.Diagnostic{{
+			Range:    d.Name.Range(),
+			Severity: severityWarning(),
+			Source:   strPtr("caddy-ls"),
+			Message:  msg,
+		}}
+	}
+	return nil
+}
+
+func analyzeSiteDirective(d *parser.Directive) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
 
 	name := d.Name.Value
@@ -157,7 +210,7 @@ func analyzeDirective(d *parser.Directive) []protocol.Diagnostic {
 	if strings.HasPrefix(name, "@") {
 		return diags
 	}
-	if !knownTopLevel[name] {
+	if !KnownTopLevel[name] {
 		var msg string
 		if parent, ok := knownSubDirectiveParent[name]; ok {
 			msg = fmt.Sprintf("%q must appear inside a %q block, not at the site level", name, parent)
