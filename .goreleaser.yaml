@@ -8,7 +8,7 @@ builds:
   - id: caddy-ls
     main: ./cmd/caddy-ls
     binary: caddy-ls
-    goos: [linux, darwin, windows]
+    goos: [linux, darwin]
     goarch: [amd64, arm64]
     ldflags:
       - -s -w -X main.appVersion={{.Version}}
