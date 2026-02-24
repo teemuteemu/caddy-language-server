@@ -69,6 +69,80 @@ var directiveDocs = map[string]string{
 	"bind": "**bind** — overrides the interface to which the listener binds.\n\n```\nbind <hosts...>\n```",
 	"import": "**import** — imports a Caddyfile snippet or file.\n\n```\nimport <pattern> [<args...>]\n```",
 	"local_certs": "**local_certs** — causes all certificates to be issued locally.\n\n```\nlocal_certs\n```",
+
+	// reverse_proxy subdirectives
+	"to":                  "**to** *(reverse_proxy)* — upstream address(es) to proxy requests to.\n\n```\nto <upstreams...>\n```",
+	"transport":           "**transport** *(reverse_proxy)* — configures the transport used to connect to upstreams.\n\n```\ntransport http|fastcgi [<options>] {\n    ...\n}\n```",
+	"header_up":           "**header_up** *(reverse_proxy)* — sets, adds, or removes a request header before proxying.\n\n```\nheader_up [+|-|>]<field> [<value>]\n```",
+	"header_down":         "**header_down** *(reverse_proxy)* — sets, adds, or removes a response header.\n\n```\nheader_down [+|-|>]<field> [<value>]\n```",
+	"lb_policy":           "**lb_policy** *(reverse_proxy)* — load balancing policy.\n\n```\nlb_policy random|least_conn|round_robin|ip_hash|uri_hash|header <field>|cookie [<options>]\n```",
+	"lb_retries":          "**lb_retries** *(reverse_proxy)* — number of times to retry selecting an upstream.\n\n```\nlb_retries <count>\n```",
+	"lb_try_duration":     "**lb_try_duration** *(reverse_proxy)* — total time budget for retrying failed requests.\n\n```\nlb_try_duration <duration>\n```",
+	"lb_try_interval":     "**lb_try_interval** *(reverse_proxy)* — how long to wait between retry attempts.\n\n```\nlb_try_interval <duration>\n```",
+	"health_uri":          "**health_uri** *(reverse_proxy)* — URI to use for active health checks.\n\n```\nhealth_uri <uri>\n```",
+	"health_port":         "**health_port** *(reverse_proxy)* — port to use for active health checks.\n\n```\nhealth_port <port>\n```",
+	"health_interval":     "**health_interval** *(reverse_proxy)* — how often to perform active health checks.\n\n```\nhealth_interval <duration>\n```",
+	"health_timeout":      "**health_timeout** *(reverse_proxy)* — timeout for active health check requests.\n\n```\nhealth_timeout <duration>\n```",
+	"health_status":       "**health_status** *(reverse_proxy)* — expected HTTP status code for a healthy upstream.\n\n```\nhealth_status <status>\n```",
+	"health_body":         "**health_body** *(reverse_proxy)* — regex that the health check response body must match.\n\n```\nhealth_body <regexp>\n```",
+	"max_fails":           "**max_fails** *(reverse_proxy)* — number of failures before marking an upstream unhealthy.\n\n```\nmax_fails <count>\n```",
+	"unhealthy_status":    "**unhealthy_status** *(reverse_proxy)* — response status codes that mark an upstream as unhealthy.\n\n```\nunhealthy_status <status>...\n```",
+	"unhealthy_latency":   "**unhealthy_latency** *(reverse_proxy)* — latency threshold that marks an upstream as unhealthy.\n\n```\nunhealthy_latency <duration>\n```",
+	"flush_interval":      "**flush_interval** *(reverse_proxy)* — how often to flush buffered response data to the client.\n\n```\nflush_interval <duration>|-1\n```",
+	"trusted_proxies":     "**trusted_proxies** *(reverse_proxy)* — upstreams whose X-Forwarded-* headers should be trusted.\n\n```\ntrusted_proxies <ranges...>\n```",
+	"handle_response":     "**handle_response** *(reverse_proxy)* — defines a route that handles specific upstream responses.\n\n```\nhandle_response [<matcher>] {\n    <directives...>\n}\n```",
+	"replace_status":      "**replace_status** *(reverse_proxy)* — replaces the response status code.\n\n```\nreplace_status [<matcher>] <status_code>\n```",
+
+	// tls subdirectives
+	"protocols":       "**protocols** *(tls)* — minimum and maximum TLS protocol versions.\n\n```\nprotocols <min> [<max>]\n```",
+	"ciphers":         "**ciphers** *(tls)* — cipher suites to use (TLS 1.2 and below).\n\n```\nciphers <suites...>\n```",
+	"curves":          "**curves** *(tls)* — elliptic curves for key exchange.\n\n```\ncurves <curves...>\n```",
+	"alpn":            "**alpn** *(tls)* — ALPN protocols to advertise.\n\n```\nalpn <values...>\n```",
+	"ca":              "**ca** *(tls)* — ACME CA endpoint URL.\n\n```\nca <url>\n```",
+	"ca_root":         "**ca_root** *(tls)* — trusted root certificate for the ACME CA.\n\n```\nca_root <pem_file>\n```",
+	"dns":             "**dns** *(tls)* — DNS challenge provider for obtaining certificates.\n\n```\ndns <provider_name> [<options>]\n```",
+	"resolvers":       "**resolvers** *(tls)* — custom DNS resolvers to use during challenges.\n\n```\nresolvers <ip_addresses...>\n```",
+	"eab":             "**eab** *(tls)* — external account binding credentials for ACME.\n\n```\neab <key_id> <mac_key>\n```",
+	"on_demand":       "**on_demand** *(tls)* — enables on-demand TLS certificate issuance.\n\n```\non_demand\n```",
+	"client_auth":     "**client_auth** *(tls)* — configures mutual TLS client authentication.\n\n```\nclient_auth {\n    mode request|require|verify_if_given|require_and_verify\n    trusted_ca_certs <pem_files...>\n}\n```",
+	"get_certificate": "**get_certificate** *(tls)* — obtains a certificate from a module at handshake time.\n\n```\nget_certificate <source> [<options>]\n```",
+
+	// encode subdirectives
+	"gzip":           "**gzip** *(encode)* — enables gzip compression.\n\n```\ngzip [<level>]\n```",
+	"zstd":           "**zstd** *(encode)* — enables Zstandard compression.\n\n```\nzstd\n```",
+	"br":             "**br** *(encode)* — enables Brotli compression.\n\n```\nbr [<quality>]\n```",
+	"minimum_length": "**minimum_length** *(encode)* — minimum response size in bytes before compressing.\n\n```\nminimum_length <length>\n```",
+
+	// log subdirectives
+	"output":   "**output** *(log)* — log output module (file, stderr, stdout, discard).\n\n```\noutput file <path> {\n    roll_size <size>\n    roll_keep <count>\n    roll_keep_for <duration>\n}\n```",
+	"format":   "**format** *(log)* — log format module (json, console, filter).\n\n```\nformat json|console\n```",
+	"level":    "**level** *(log)* — minimum log level to emit (DEBUG, INFO, WARN, ERROR).\n\n```\nlevel DEBUG|INFO|WARN|ERROR\n```",
+	"include":  "**include** *(log)* — logger names to include in this log.\n\n```\ninclude <names...>\n```",
+	"exclude":  "**exclude** *(log)* — logger names to exclude from this log.\n\n```\nexclude <names...>\n```",
+	"sampling": "**sampling** *(log)* — log sampling configuration.\n\n```\nsampling {\n    interval <duration>\n    first <count>\n    thereafter <count>\n}\n```",
+
+	// file_server subdirectives
+	"hide":                   "**hide** *(file_server)* — files or directories to hide from directory listings.\n\n```\nhide <files...>\n```",
+	"index":                  "**index** *(file_server)* — filenames to look for as directory index files.\n\n```\nindex <files...>\n```",
+	"browse":                 "**browse** *(file_server)* — enables directory browsing with an optional template.\n\n```\nbrowse [<template_file>]\n```",
+	"precompressed":          "**precompressed** *(file_server)* — file encodings to look for as precompressed variants.\n\n```\nprecompressed zstd|br|gzip\n```",
+	"pass_thru":              "**pass_thru** *(file_server)* — passes requests through to the next handler if a file is not found.\n\n```\npass_thru\n```",
+	"disable_canonical_uris": "**disable_canonical_uris** *(file_server)* — disables redirects to canonicalize trailing slashes.\n\n```\ndisable_canonical_uris\n```",
+
+	// request_body subdirectives
+	"max_size": "**max_size** *(request_body)* — maximum request body size (e.g. 10MB).\n\n```\nmax_size <size>\n```",
+
+	// forward_auth subdirectives
+	"copy_headers":          "**copy_headers** *(forward_auth)* — response headers to copy to the original request.\n\n```\ncopy_headers <fields...>\n```",
+	"trust_forward_header":  "**trust_forward_header** *(forward_auth)* — trusts existing X-Forwarded-* request headers.\n\n```\ntrust_forward_header\n```",
+
+	// tracing subdirectives
+	"span": "**span** *(tracing)* — override the default OpenTelemetry span name.\n\n```\nspan <name>\n```",
+
+	// acme_server subdirectives
+	"lifetime":   "**lifetime** *(acme_server)* — override the default certificate lifetime.\n\n```\nlifetime <duration>\n```",
+	"challenges": "**challenges** *(acme_server)* — ACME challenge types to enable.\n\n```\nchallenges http-01|tls-alpn-01|dns-01\n```",
+
 }
 
 // Hover handles textDocument/hover.
