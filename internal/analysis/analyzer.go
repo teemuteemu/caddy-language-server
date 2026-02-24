@@ -335,6 +335,8 @@ func Analyze(f *parser.File) []protocol.Diagnostic {
 		}
 	}
 
+	diags = append(diags, analyzeFilePlaceholders(f)...)
+
 	return diags
 }
 
