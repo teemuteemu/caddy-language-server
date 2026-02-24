@@ -72,9 +72,13 @@ func (l *Lexer) run() {
 			// skip bare \r
 
 		case ch == '{':
-			l.emit(LBRACE, "{")
-			l.pos++
-			l.char++
+			if l.isPlaceholder() {
+				l.lexIdent()
+			} else {
+				l.emit(LBRACE, "{")
+				l.pos++
+				l.char++
+			}
 
 		case ch == '}':
 			l.emit(RBRACE, "}")
@@ -152,12 +156,42 @@ func (l *Lexer) lexQuoted(quote rune) {
 	})
 }
 
+// isPlaceholder reports whether the '{' at l.pos is the start of a Caddy
+// placeholder like {$VAR} or {http.request.uri} rather than a block brace.
+// A placeholder has a non-whitespace, non-brace character immediately after '{'.
+func (l *Lexer) isPlaceholder() bool {
+	if l.pos+1 >= len(l.src) {
+		return false
+	}
+	next := l.src[l.pos+1]
+	return next != '{' && next != '}' && next != '\n' && next != '\r' && !unicode.IsSpace(next)
+}
+
 func (l *Lexer) lexIdent() {
 	start := l.pos
 	startChar := l.char
 	for l.pos < len(l.src) {
 		ch := l.src[l.pos]
-		if ch == '{' || ch == '}' || ch == '\n' || ch == '\r' || unicode.IsSpace(ch) {
+		if ch == '{' {
+			if l.isPlaceholder() {
+				// Consume the embedded placeholder {…} as part of this token.
+				l.pos++ // consume '{'
+				for l.pos < len(l.src) {
+					c := l.src[l.pos]
+					if c == '}' {
+						l.pos++ // consume '}'
+						break
+					}
+					if c == '\n' || c == '\r' {
+						break // malformed placeholder; stop consuming
+					}
+					l.pos++
+				}
+				continue
+			}
+			break
+		}
+		if ch == '}' || ch == '\n' || ch == '\r' || unicode.IsSpace(ch) {
 			break
 		}
 		l.pos++
