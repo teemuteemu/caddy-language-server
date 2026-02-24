@@ -252,7 +252,9 @@ func TestAnalyze_FreeformBody_NoWarning(t *testing.T) {
 }
 
 func TestAnalyze_ImportInSubDirectiveBody_NoWarning(t *testing.T) {
-	// import is valid anywhere in a Caddyfile, including inside directive bodies.
+	// import inside a non-container directive body (e.g. reverse_proxy) is
+	// allowed without snippet validation to avoid false positives when the
+	// snippet is defined in an external file.
 	src := "example.com {\n\treverse_proxy {\n\t\timport my_snippet\n\t\tto localhost:8080\n\t}\n}\n"
 	diags := analyze(src)
 	if len(diags) != 0 {
@@ -266,6 +268,91 @@ func TestAnalyze_MatcherInSubDirectiveBody_NoWarning(t *testing.T) {
 	diags := analyze(src)
 	if len(diags) != 0 {
 		t.Errorf("matcher in container body: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+// --- snippet collection ------------------------------------------------------
+
+func TestCollectSnippetNames_Empty(t *testing.T) {
+	f, _ := parser.Parse("example.com {\n\trespond \"ok\"\n}\n")
+	names := CollectSnippetNames(f)
+	if len(names) != 0 {
+		t.Errorf("expected no snippets, got %v", names)
+	}
+}
+
+func TestCollectSnippetNames_Single(t *testing.T) {
+	f, _ := parser.Parse("(mysnippet) {\n\trespond \"ok\"\n}\n")
+	names := CollectSnippetNames(f)
+	if len(names) != 1 || names[0] != "mysnippet" {
+		t.Errorf("expected [mysnippet], got %v", names)
+	}
+}
+
+func TestCollectSnippetNames_Multiple(t *testing.T) {
+	src := "(alpha) {\n\trespond \"a\"\n}\n(beta) {\n\trespond \"b\"\n}\nexample.com {\n\trespond \"ok\"\n}\n"
+	f, _ := parser.Parse(src)
+	names := CollectSnippetNames(f)
+	if len(names) != 2 || names[0] != "alpha" || names[1] != "beta" {
+		t.Errorf("expected [alpha beta] (sorted), got %v", names)
+	}
+}
+
+// --- import validation -------------------------------------------------------
+
+func TestAnalyze_ImportKnownSnippet_NoWarning(t *testing.T) {
+	src := "(mysnippet) {\n\trespond \"ok\"\n}\nexample.com {\n\timport mysnippet\n}\n"
+	diags := analyze(src)
+	if len(diags) != 0 {
+		t.Errorf("import of defined snippet: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_ImportUndefinedSnippet_Warning(t *testing.T) {
+	src := "example.com {\n\timport no_such_snippet\n}\n"
+	diags := analyze(src)
+	if len(diags) != 1 {
+		t.Fatalf("import of undefined snippet: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "no_such_snippet") {
+		t.Errorf("diagnostic should name the undefined snippet, got: %q", diags[0].Message)
+	}
+}
+
+func TestAnalyze_ImportFilePath_NoWarning(t *testing.T) {
+	// Paths and globs reference external files and must not be validated.
+	cases := []string{
+		"example.com {\n\timport /etc/caddy/common.conf\n}\n",
+		"example.com {\n\timport ./snippets/*.conf\n}\n",
+		"example.com {\n\timport ../shared/tls.conf\n}\n",
+	}
+	for _, src := range cases {
+		diags := analyze(src)
+		if len(diags) != 0 {
+			t.Errorf("file import: expected no diagnostics, got %d: %v", len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_ImportInContainerDirective_ValidatesSnippet(t *testing.T) {
+	// import inside handle/route is validated because those are container directives.
+	defined := "(mysnippet) {\n\trespond \"ok\"\n}\nexample.com {\n\thandle {\n\t\timport mysnippet\n\t}\n}\n"
+	if diags := analyze(defined); len(diags) != 0 {
+		t.Errorf("import of defined snippet in handle: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+
+	undefined := "example.com {\n\thandle {\n\t\timport ghost\n\t}\n}\n"
+	if diags := analyze(undefined); len(diags) != 1 {
+		t.Errorf("import of undefined snippet in handle: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_ImportGlobalLevel_ValidatesSnippet(t *testing.T) {
+	// import at global-options level is also validated.
+	undefined := "{\n\timport no_such_global_snippet\n}\nexample.com {\n\trespond \"ok\"\n}\n"
+	diags := analyze(undefined)
+	if len(diags) != 1 {
+		t.Errorf("import of undefined snippet at global level: expected 1 diagnostic, got %d: %v", len(diags), diags)
 	}
 }
 

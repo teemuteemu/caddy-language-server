@@ -148,6 +148,129 @@ func TestAtSiteBlockLevel_EmptyFile(t *testing.T) {
 	}
 }
 
+// --- importArgPrefix ---------------------------------------------------------
+
+func TestImportArgPrefix_NotImport(t *testing.T) {
+	_, ok := importArgPrefix("reverse_proxy localhost", protocol.Position{Line: 0, Character: 14})
+	if ok {
+		t.Error("non-import line: want false")
+	}
+}
+
+func TestImportArgPrefix_JustImportWord(t *testing.T) {
+	// Cursor still on the word "import" — not yet in arg position.
+	_, ok := importArgPrefix("import", protocol.Position{Line: 0, Character: 6})
+	if ok {
+		t.Error("cursor still on 'import' keyword: want false")
+	}
+}
+
+func TestImportArgPrefix_AfterImportSpace_EmptyArg(t *testing.T) {
+	partial, ok := importArgPrefix("import ", protocol.Position{Line: 0, Character: 7})
+	if !ok {
+		t.Error("cursor right after 'import ': want true")
+	}
+	if partial != "" {
+		t.Errorf("partial: want \"\", got %q", partial)
+	}
+}
+
+func TestImportArgPrefix_PartialSnippetName(t *testing.T) {
+	partial, ok := importArgPrefix("    import my", protocol.Position{Line: 0, Character: 13})
+	if !ok {
+		t.Error("cursor in partial snippet name: want true")
+	}
+	if partial != "my" {
+		t.Errorf("partial: want \"my\", got %q", partial)
+	}
+}
+
+func TestImportArgPrefix_FullSnippetName_NoTrailingSpace(t *testing.T) {
+	// Cursor at end of the snippet name, no space yet — still first arg.
+	partial, ok := importArgPrefix("import mysnippet", protocol.Position{Line: 0, Character: 16})
+	if !ok {
+		t.Error("cursor at end of snippet name: want true")
+	}
+	if partial != "mysnippet" {
+		t.Errorf("partial: want \"mysnippet\", got %q", partial)
+	}
+}
+
+func TestImportArgPrefix_AfterFirstArg(t *testing.T) {
+	// Cursor in the second argument — must not trigger snippet completions.
+	_, ok := importArgPrefix("import mysnippet arg2", protocol.Position{Line: 0, Character: 18})
+	if ok {
+		t.Error("cursor in second argument: want false")
+	}
+}
+
+func TestImportArgPrefix_IndentedLine(t *testing.T) {
+	// "\t\timport sni" = 12 chars; cursor after the 'i' is at character 12.
+	partial, ok := importArgPrefix("\t\timport sni", protocol.Position{Line: 0, Character: 12})
+	if !ok {
+		t.Error("indented import line: want true")
+	}
+	if partial != "sni" {
+		t.Errorf("partial: want \"sni\", got %q", partial)
+	}
+}
+
+func TestImportArgPrefix_MultiLine(t *testing.T) {
+	// line 1 = "\timport my" = 10 chars; cursor after 'y' is at character 10.
+	content := "example.com {\n\timport my"
+	partial, ok := importArgPrefix(content, protocol.Position{Line: 1, Character: 10})
+	if !ok {
+		t.Error("import on second line: want true")
+	}
+	if partial != "my" {
+		t.Errorf("partial: want \"my\", got %q", partial)
+	}
+}
+
+// --- snippetCompletions ------------------------------------------------------
+
+func TestSnippetCompletions_Empty(t *testing.T) {
+	f := parseAST("example.com {\n\trespond \"ok\"\n}\n")
+	items := snippetCompletions(f, "")
+	if len(items) != 0 {
+		t.Errorf("no snippets defined: want 0 items, got %d", len(items))
+	}
+}
+
+func TestSnippetCompletions_AllSnippets(t *testing.T) {
+	src := "(alpha) {\n\trespond \"a\"\n}\n(beta) {\n\trespond \"b\"\n}\nexample.com {\n\trespond \"ok\"\n}\n"
+	f := parseAST(src)
+	items := snippetCompletions(f, "")
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d", len(items))
+	}
+	labels := map[string]bool{items[0].Label: true, items[1].Label: true}
+	if !labels["alpha"] || !labels["beta"] {
+		t.Errorf("unexpected labels: %v", labels)
+	}
+}
+
+func TestSnippetCompletions_FilterByPrefix(t *testing.T) {
+	src := "(alpha) {\n\trespond \"a\"\n}\n(bravo) {\n\trespond \"b\"\n}\n(alcazar) {\n\trespond \"c\"\n}\n"
+	f := parseAST(src)
+	items := snippetCompletions(f, "al")
+	if len(items) != 2 {
+		t.Fatalf("want 2 items matching \"al*\", got %d: %v", len(items), items)
+	}
+}
+
+func TestSnippetCompletions_KindIsModule(t *testing.T) {
+	src := "(mysnippet) {\n\trespond \"ok\"\n}\n"
+	f := parseAST(src)
+	items := snippetCompletions(f, "")
+	if len(items) != 1 {
+		t.Fatalf("want 1 item, got %d", len(items))
+	}
+	if items[0].Kind == nil || *items[0].Kind != protocol.CompletionItemKindModule {
+		t.Errorf("want CompletionItemKindModule, got %v", items[0].Kind)
+	}
+}
+
 // --- hasBody -----------------------------------------------------------------
 
 func TestHasBody_WithBody(t *testing.T) {

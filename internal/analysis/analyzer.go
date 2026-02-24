@@ -3,6 +3,7 @@ package analysis
 import (
 	"caddy-ls/internal/parser"
 	"fmt"
+	"sort"
 	"strings"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -243,6 +244,63 @@ var KnownGlobalOptions = map[string]bool{
 	"import":             true,
 }
 
+// analyzer holds per-file state used during a single analysis pass.
+type analyzer struct {
+	snippets map[string]bool // snippet names defined in the file (without parens)
+}
+
+// CollectSnippetNames returns the names of all snippets defined in f, without
+// the surrounding parentheses, sorted alphabetically. The completion handler
+// uses this to suggest snippet names after "import".
+func CollectSnippetNames(f *parser.File) []string {
+	var names []string
+	for _, sb := range f.SiteBlocks {
+		if len(sb.Addresses) == 0 {
+			continue
+		}
+		if name, ok := parseSnippetName(sb.Addresses[0].Value); ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// parseSnippetName extracts the snippet name from an address token like
+// "(mysnippet)", returning ("mysnippet", true), or ("", false) if the address
+// is not a snippet definition.
+func parseSnippetName(addr string) (string, bool) {
+	if strings.HasPrefix(addr, "(") && strings.HasSuffix(addr, ")") && len(addr) > 2 {
+		return addr[1 : len(addr)-1], true
+	}
+	return "", false
+}
+
+// collectSnippets builds a lookup map for O(1) snippet-name validation.
+func collectSnippets(f *parser.File) map[string]bool {
+	names := CollectSnippetNames(f)
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
+}
+
+// isFileImport reports whether an import argument is a file path or glob
+// pattern. File imports are not validated against the snippet registry.
+func isFileImport(arg string) bool {
+	return strings.Contains(arg, "/") ||
+		strings.Contains(arg, "*") ||
+		strings.Contains(arg, "\\") ||
+		strings.HasPrefix(arg, ".")
+}
+
+// isCaddyPlaceholder reports whether arg is a Caddy runtime placeholder
+// like {$ENV_VAR} or {http.request.uri}. These cannot be resolved statically.
+func isCaddyPlaceholder(arg string) bool {
+	return strings.HasPrefix(arg, "{") && strings.HasSuffix(arg, "}")
+}
+
 func severityWarning() *protocol.DiagnosticSeverity {
 	s := protocol.DiagnosticSeverityWarning
 	return &s
@@ -257,11 +315,12 @@ func isSnippet(sb *parser.SiteBlock) bool {
 
 // Analyze walks the AST and returns diagnostics.
 func Analyze(f *parser.File) []protocol.Diagnostic {
+	a := &analyzer{snippets: collectSnippets(f)}
 	var diags []protocol.Diagnostic
 
 	if f.GlobalBlock != nil {
 		for _, d := range f.GlobalBlock.Directives {
-			diags = append(diags, analyzeGlobalDirective(d)...)
+			diags = append(diags, a.analyzeGlobalDirective(d)...)
 		}
 	}
 
@@ -270,31 +329,33 @@ func Analyze(f *parser.File) []protocol.Diagnostic {
 			continue
 		}
 		for _, d := range sb.Directives {
-			diags = append(diags, analyzeSiteDirective(d)...)
+			diags = append(diags, a.analyzeSiteDirective(d)...)
 		}
 	}
 
 	return diags
 }
 
-func analyzeGlobalDirective(d *parser.Directive) []protocol.Diagnostic {
+func (a *analyzer) analyzeGlobalDirective(d *parser.Directive) []protocol.Diagnostic {
 	name := d.Name.Value
 	if strings.HasPrefix(name, "@") {
 		return nil
 	}
 	if !KnownGlobalOptions[name] {
-		msg := fmt.Sprintf("unknown global option %q", name)
 		return []protocol.Diagnostic{{
 			Range:    d.Name.Range(),
 			Severity: severityWarning(),
 			Source:   strPtr("caddy-ls"),
-			Message:  msg,
+			Message:  fmt.Sprintf("unknown global option %q", name),
 		}}
+	}
+	if name == "import" {
+		return a.analyzeImport(d)
 	}
 	return nil
 }
 
-func analyzeSiteDirective(d *parser.Directive) []protocol.Diagnostic {
+func (a *analyzer) analyzeSiteDirective(d *parser.Directive) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
 
 	name := d.Name.Value
@@ -319,13 +380,19 @@ func analyzeSiteDirective(d *parser.Directive) []protocol.Diagnostic {
 		return diags
 	}
 
+	// import is handled separately so the snippet reference can be validated.
+	if name == "import" {
+		diags = append(diags, a.analyzeImport(d)...)
+		return diags
+	}
+
 	// Validate subdirectives inside the body block.
-	diags = append(diags, analyzeDirectiveBody(name, d.Body)...)
+	diags = append(diags, a.analyzeDirectiveBody(name, d.Body)...)
 	return diags
 }
 
 // analyzeDirectiveBody validates the subdirectives inside a directive's body block.
-func analyzeDirectiveBody(parentName string, body []*parser.Directive) []protocol.Diagnostic {
+func (a *analyzer) analyzeDirectiveBody(parentName string, body []*parser.Directive) []protocol.Diagnostic {
 	if len(body) == 0 {
 		return nil
 	}
@@ -334,7 +401,7 @@ func analyzeDirectiveBody(parentName string, body []*parser.Directive) []protoco
 	if containerDirectives[parentName] {
 		var diags []protocol.Diagnostic
 		for _, sub := range body {
-			diags = append(diags, analyzeSiteDirective(sub)...)
+			diags = append(diags, a.analyzeSiteDirective(sub)...)
 		}
 		return diags
 	}
@@ -365,6 +432,28 @@ func analyzeDirectiveBody(parentName string, body []*parser.Directive) []protoco
 		// further to avoid false positives on module-specific syntax.
 	}
 	return diags
+}
+
+// analyzeImport validates the snippet reference in an import directive.
+// File paths, glob patterns, and Caddy placeholders are accepted without
+// checking; bare names are validated against the snippets defined in the file.
+func (a *analyzer) analyzeImport(d *parser.Directive) []protocol.Diagnostic {
+	if len(d.Args) == 0 {
+		return nil
+	}
+	arg := d.Args[0].Token.Value
+	if isFileImport(arg) || isCaddyPlaceholder(arg) {
+		return nil
+	}
+	if !a.snippets[arg] {
+		return []protocol.Diagnostic{{
+			Range:    d.Args[0].Range(),
+			Severity: severityWarning(),
+			Source:   strPtr("caddy-ls"),
+			Message:  fmt.Sprintf("undefined snippet %q", arg),
+		}}
+	}
+	return nil
 }
 
 func strPtr(s string) *string { return &s }

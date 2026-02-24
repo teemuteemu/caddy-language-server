@@ -30,6 +30,13 @@ func (h *Handler) Completion(ctx *glsp.Context, params *protocol.CompletionParam
 		return empty, nil
 	}
 
+	// When the cursor is in the argument position of an "import" directive,
+	// suggest snippet names defined in the current file.
+	if partial, ok := importArgPrefix(content, params.Position); ok {
+		ast, _ := parser.Parse(content)
+		return snippetCompletions(ast, partial), nil
+	}
+
 	// Only suggest directives when the cursor is on the first token of the
 	// line (not in an argument position after an existing directive/keyword).
 	if !atFirstTokenPosition(content, params.Position) {
@@ -53,6 +60,53 @@ func (h *Handler) Completion(ctx *glsp.Context, params *protocol.CompletionParam
 		})
 	}
 	return items, nil
+}
+
+// importArgPrefix reports whether the cursor is in the first-argument position
+// of an "import" directive on the current line. If so, it returns the partial
+// snippet name typed so far (may be empty) and true.
+func importArgPrefix(content string, pos protocol.Position) (string, bool) {
+	lines := strings.Split(content, "\n")
+	if int(pos.Line) >= len(lines) {
+		return "", false
+	}
+	line := lines[pos.Line]
+	col := int(pos.Character)
+	if col > len(line) {
+		col = len(line)
+	}
+	// Normalise indentation.
+	prefix := strings.TrimLeft(line[:col], " \t")
+	// Must start with "import" followed by at least one space/tab.
+	rest, found := strings.CutPrefix(prefix, "import")
+	if !found || len(rest) == 0 || (rest[0] != ' ' && rest[0] != '\t') {
+		return "", false
+	}
+	// The (partial) first argument typed so far.
+	arg := strings.TrimLeft(rest, " \t")
+	// If arg already contains whitespace the cursor is past the first argument.
+	if strings.ContainsAny(arg, " \t") {
+		return "", false
+	}
+	return arg, true
+}
+
+// snippetCompletions returns CompletionItems for all snippet names defined in f
+// whose name starts with partial.
+func snippetCompletions(f *parser.File, partial string) []protocol.CompletionItem {
+	names := analysis.CollectSnippetNames(f)
+	kind := protocol.CompletionItemKindModule
+	items := make([]protocol.CompletionItem, 0, len(names))
+	for _, name := range names {
+		if strings.HasPrefix(name, partial) {
+			n := name
+			items = append(items, protocol.CompletionItem{
+				Label: n,
+				Kind:  &kind,
+			})
+		}
+	}
+	return items
 }
 
 // atFirstTokenPosition reports whether the cursor is still within the first
