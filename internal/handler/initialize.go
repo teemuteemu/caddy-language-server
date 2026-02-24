@@ -34,7 +34,7 @@ func (h *Handler) SetTrace(ctx *glsp.Context, params *protocol.SetTraceParams) e
 // CreateServerCapabilities returns the capabilities advertised to the client.
 func (h *Handler) CreateServerCapabilities() protocol.ServerCapabilities {
 	syncKind := protocol.TextDocumentSyncKindFull
-	triggerChars := []string{" ", "."}
+	triggerChars := []string{"."}
 
 	return protocol.ServerCapabilities{
 		TextDocumentSync: &protocol.TextDocumentSyncOptions{

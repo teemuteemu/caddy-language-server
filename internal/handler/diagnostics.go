@@ -14,7 +14,7 @@ const version = "0.0.1"
 func (h *Handler) Analyze(ctx *glsp.Context, uri, content string) {
 	ast, parseErrors := parser.Parse(content)
 
-	var diags []protocol.Diagnostic
+	diags := []protocol.Diagnostic{}
 
 	// Convert parse errors to diagnostics
 	for _, pe := range parseErrors {

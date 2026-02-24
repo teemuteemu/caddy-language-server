@@ -1,1 +1,1 @@
-This project is a Caddy language server implemented in Golang.
+This project is a Caddy language server implemented in Golang. The source of truth for the Caddyfile format is this documentation https://caddyserver.com/docs/caddyfile. It needs to work correctly with directives and subdirectives described here https://caddyserver.com/docs/caddyfile/directives#syntax and request mathers described here https://caddyserver.com/docs/caddyfile/matchers#syntax
