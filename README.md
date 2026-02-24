@@ -10,18 +10,6 @@ A language server for [Caddyfile](https://caddyserver.com/docs/caddyfile) config
 
 The parser is built on Caddy's own tokenizer (`github.com/caddyserver/caddy/v2/caddyconfig/caddyfile`) so it stays in sync with Caddy's actual syntax rules.
 
-## Installation
-
-```
-go install caddy-ls/cmd/caddy-ls@latest
-```
-
-Or build from source:
-
-```
-make install   # builds to ~/bin/caddy-ls
-```
-
 ## Editor setup
 
 caddy-ls communicates over stdio using the Language Server Protocol (JSON-RPC 2.0). Point your editor's LSP client at the `caddy-ls` binary with no extra arguments.
