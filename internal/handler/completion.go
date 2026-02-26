@@ -53,10 +53,17 @@ func (h *Handler) Completion(ctx *glsp.Context, params *protocol.CompletionParam
 	items := make([]protocol.CompletionItem, 0, len(names))
 	for _, name := range names {
 		n := name
-		items = append(items, protocol.CompletionItem{
+		item := protocol.CompletionItem{
 			Label: n,
 			Kind:  &kind,
-		})
+		}
+		if doc, ok := directiveDocs[n]; ok {
+			item.Documentation = protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
+				Value: doc,
+			}
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }
