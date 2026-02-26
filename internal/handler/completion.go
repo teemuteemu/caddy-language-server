@@ -57,11 +57,8 @@ func (h *Handler) Completion(ctx *glsp.Context, params *protocol.CompletionParam
 			Label: n,
 			Kind:  &kind,
 		}
-		if doc, ok := directiveDocs[n]; ok {
-			item.Documentation = protocol.MarkupContent{
-				Kind:  protocol.MarkupKindMarkdown,
-				Value: doc,
-			}
+		if doc, ok := lookupDirectiveDoc(n); ok {
+			item.Documentation = protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: doc}
 		}
 		items = append(items, item)
 	}

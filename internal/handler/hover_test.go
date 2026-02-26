@@ -118,8 +118,8 @@ func TestDirectiveDocs_CommonDirectivesPresent(t *testing.T) {
 		"handle_errors", "handle_path", "abort", "error",
 	}
 	for _, name := range mustHave {
-		if _, ok := directiveDocs[name]; !ok {
-			t.Errorf("directiveDocs missing entry for %q", name)
+		if _, ok := lookupDirectiveDoc(name); !ok {
+			t.Errorf("directive docs missing entry for %q", name)
 		}
 	}
 }

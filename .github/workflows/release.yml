@@ -17,6 +17,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Check docs_gen.go is up to date
+        run: |
+          go generate ./internal/handler/
+          git diff --exit-code internal/handler/docs_gen.go
       - run: go test ./...
       - uses: goreleaser/goreleaser-action@v6
         with:
