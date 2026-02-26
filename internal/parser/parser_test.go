@@ -282,3 +282,105 @@ func TestParse_OnlyComments(t *testing.T) {
 		t.Errorf("expected 0 site blocks, got %d", len(f.SiteBlocks))
 	}
 }
+
+// ---- ParseError -------------------------------------------------------------
+
+func TestParseError_ErrorMessage(t *testing.T) {
+	src := "example.com {\n\trespond \"ok\"\n" // unclosed
+	_, errs := Parse(src)
+	if len(errs) == 0 {
+		t.Fatal("expected at least one parse error")
+	}
+	// Error() must return a non-empty string matching the Message field.
+	for _, e := range errs {
+		if e.Error() != e.Message {
+			t.Errorf("Error() = %q, want %q", e.Error(), e.Message)
+		}
+		if e.Error() == "" {
+			t.Error("Error() must not be empty")
+		}
+	}
+}
+
+func TestParse_MultipleErrors(t *testing.T) {
+	// Two stray closing braces should each produce a parse error.
+	src := "}\n}\n"
+	_, errs := Parse(src)
+	if len(errs) < 2 {
+		t.Errorf("expected >=2 parse errors, got %d: %v", len(errs), errs)
+	}
+}
+
+// ---- empty / edge-case inputs -----------------------------------------------
+
+func TestParse_EmptyGlobalBlock(t *testing.T) {
+	src := "{\n}\nexample.com {\n\trespond \"ok\"\n}\n"
+	f := mustParse(t, src)
+	if f.GlobalBlock == nil {
+		t.Fatal("expected global block, got nil")
+	}
+	if len(f.GlobalBlock.Directives) != 0 {
+		t.Errorf("empty global block: want 0 directives, got %d", len(f.GlobalBlock.Directives))
+	}
+	if len(f.SiteBlocks) != 1 {
+		t.Errorf("want 1 site block, got %d", len(f.SiteBlocks))
+	}
+}
+
+// ---- nested directive bodies ------------------------------------------------
+
+func TestParse_ThreeLevelNesting(t *testing.T) {
+	// handle > reverse_proxy > transport
+	src := "example.com {\n\thandle {\n\t\treverse_proxy {\n\t\t\ttransport http {\n\t\t\t\ttls\n\t\t\t}\n\t\t}\n\t}\n}\n"
+	f := mustParse(t, src)
+
+	if len(f.SiteBlocks) != 1 {
+		t.Fatalf("want 1 site block, got %d", len(f.SiteBlocks))
+	}
+	handle := f.SiteBlocks[0].Directives[0]
+	if handle.Name.Value != "handle" {
+		t.Fatalf("want 'handle', got %q", handle.Name.Value)
+	}
+	if len(handle.Body) != 1 {
+		t.Fatalf("handle body: want 1, got %d", len(handle.Body))
+	}
+	rp := handle.Body[0]
+	if rp.Name.Value != "reverse_proxy" {
+		t.Fatalf("want 'reverse_proxy', got %q", rp.Name.Value)
+	}
+	if len(rp.Body) != 1 {
+		t.Fatalf("reverse_proxy body: want 1, got %d", len(rp.Body))
+	}
+	transport := rp.Body[0]
+	if transport.Name.Value != "transport" {
+		t.Fatalf("want 'transport', got %q", transport.Name.Value)
+	}
+	if len(transport.Args) != 1 || transport.Args[0].Token.Value != "http" {
+		t.Errorf("transport args: want [http], got %v", transport.Args)
+	}
+	if len(transport.Body) != 1 || transport.Body[0].Name.Value != "tls" {
+		t.Errorf("transport body: want [tls], got %v", transport.Body)
+	}
+}
+
+// ---- File.Range() -----------------------------------------------------------
+
+func TestFileRange_EmptyFile(t *testing.T) {
+	f := mustParse(t, "")
+	rng := f.Range()
+	if rng.Start.Line != 0 || rng.Start.Character != 0 {
+		t.Errorf("empty file range start: want {0,0}, got %v", rng.Start)
+	}
+}
+
+func TestFileRange_NonEmpty(t *testing.T) {
+	src := "example.com {\n\trespond \"ok\"\n}\n"
+	f := mustParse(t, src)
+	rng := f.Range()
+	if rng.Start.Line != 0 {
+		t.Errorf("file range start line: want 0, got %d", rng.Start.Line)
+	}
+	if rng.End.Line == 0 {
+		t.Errorf("file range end line: want >0, got 0")
+	}
+}

@@ -403,6 +403,231 @@ func TestAnalyze_ImportGlobalLevel_ValidatesSnippet(t *testing.T) {
 	}
 }
 
+// --- sub-subdirective validation (e.g. transport http { … }) ------------------
+
+func TestAnalyze_TransportHTTP_ValidSubSub_NoWarning(t *testing.T) {
+	cases := []string{
+		"example.com {\n\treverse_proxy localhost:8080 {\n\t\ttransport http {\n\t\t\tread_buffer 4kb\n\t\t}\n\t}\n}\n",
+		"example.com {\n\treverse_proxy localhost:8080 {\n\t\ttransport http {\n\t\t\tdial_timeout 5s\n\t\t\ttls\n\t\t\tversions h2\n\t\t}\n\t}\n}\n",
+		"example.com {\n\treverse_proxy localhost:8080 {\n\t\ttransport http {\n\t\t\tkeepalive 30s\n\t\t\tmax_conns_per_host 10\n\t\t}\n\t}\n}\n",
+	}
+	for _, src := range cases {
+		if diags := analyze(src); len(diags) != 0 {
+			t.Errorf("valid transport http subdirectives: expected no diagnostics, got %d: %v", len(diags), diags)
+		}
+	}
+}
+
+func TestAnalyze_TransportHTTP_UnknownSubSub_Warning(t *testing.T) {
+	src := "example.com {\n\treverse_proxy http://{$LOCALHOST_GATEWAY}:3000 {\n\t\ttransport http {\n\t\t\tfoo\n\t\t}\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 1 {
+		t.Fatalf("unknown transport http subdirective: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "foo", "transport http") {
+		t.Errorf("expected message mentioning %q and %q, got: %q", "foo", "transport http", diags[0].Message)
+	}
+}
+
+func TestAnalyze_TransportFastCGI_ValidSubSub_NoWarning(t *testing.T) {
+	src := "example.com {\n\treverse_proxy localhost:9000 {\n\t\ttransport fastcgi {\n\t\t\troot /var/www\n\t\t\tsplit .php\n\t\t}\n\t}\n}\n"
+	if diags := analyze(src); len(diags) != 0 {
+		t.Errorf("valid transport fastcgi subdirectives: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_TransportFastCGI_UnknownSubSub_Warning(t *testing.T) {
+	src := "example.com {\n\treverse_proxy localhost:9000 {\n\t\ttransport fastcgi {\n\t\t\tbad_option\n\t\t}\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 1 {
+		t.Fatalf("unknown transport fastcgi subdirective: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "bad_option", "transport fastcgi") {
+		t.Errorf("expected message mentioning %q and %q, got: %q", "bad_option", "transport fastcgi", diags[0].Message)
+	}
+}
+
+// --- SubDirectivesFor --------------------------------------------------------
+
+func TestSubDirectivesFor_KnownParent(t *testing.T) {
+	subs, ok := SubDirectivesFor("reverse_proxy")
+	if !ok {
+		t.Fatal("reverse_proxy: expected ok=true")
+	}
+	if !subs["to"] || !subs["transport"] {
+		t.Errorf("reverse_proxy: expected 'to' and 'transport' in subdirectives")
+	}
+}
+
+func TestSubDirectivesFor_FreeformParent(t *testing.T) {
+	subs, ok := SubDirectivesFor("basicauth")
+	if !ok {
+		t.Fatal("basicauth: expected ok=true (freeform)")
+	}
+	if subs != nil {
+		t.Errorf("basicauth: expected nil subdirectives (freeform), got %v", subs)
+	}
+}
+
+func TestSubDirectivesFor_UnknownParent(t *testing.T) {
+	_, ok := SubDirectivesFor("not_a_known_directive")
+	if ok {
+		t.Error("unknown parent: expected ok=false")
+	}
+}
+
+// --- parseSnippetName --------------------------------------------------------
+
+func TestParseSnippetName_Valid(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"(mysnippet)", "mysnippet"},
+		{"(my_snippet)", "my_snippet"},
+		{"(a)", "a"},
+	}
+	for _, tc := range cases {
+		name, ok := parseSnippetName(tc.input)
+		if !ok || name != tc.want {
+			t.Errorf("parseSnippetName(%q): want (%q, true), got (%q, %v)", tc.input, tc.want, name, ok)
+		}
+	}
+}
+
+func TestParseSnippetName_Invalid(t *testing.T) {
+	// Empty parens "()" have len 2; single-char "(x)" is ok but "()" is not.
+	cases := []string{"example.com", "localhost:8080", "", "()", "noparens"}
+	for _, c := range cases {
+		if _, ok := parseSnippetName(c); ok {
+			t.Errorf("parseSnippetName(%q): expected false", c)
+		}
+	}
+}
+
+// --- isFileImport ------------------------------------------------------------
+
+func TestIsFileImport_Paths(t *testing.T) {
+	cases := []string{
+		"/etc/caddy/common.conf",
+		"./snippets/tls.conf",
+		"../shared/common",
+		"snippets/*.conf",
+		`C:\caddy\conf`,
+	}
+	for _, c := range cases {
+		if !isFileImport(c) {
+			t.Errorf("isFileImport(%q): expected true", c)
+		}
+	}
+}
+
+func TestIsFileImport_SnippetNames(t *testing.T) {
+	cases := []string{"mysnippet", "common_tls", "backend", "tls_opts"}
+	for _, c := range cases {
+		if isFileImport(c) {
+			t.Errorf("isFileImport(%q): expected false", c)
+		}
+	}
+}
+
+// --- isCaddyPlaceholder ------------------------------------------------------
+
+func TestIsCaddyPlaceholder_Valid(t *testing.T) {
+	cases := []string{"{$VAR}", "{http.request.uri}", "{args[0]}"}
+	for _, c := range cases {
+		if !isCaddyPlaceholder(c) {
+			t.Errorf("isCaddyPlaceholder(%q): expected true", c)
+		}
+	}
+}
+
+func TestIsCaddyPlaceholder_Invalid(t *testing.T) {
+	cases := []string{"mysnippet", "{unclosed", "nobraces", ""}
+	for _, c := range cases {
+		if isCaddyPlaceholder(c) {
+			t.Errorf("isCaddyPlaceholder(%q): expected false", c)
+		}
+	}
+}
+
+// --- multiple subdirective errors in one body --------------------------------
+
+func TestAnalyze_MultipleUnknownSubDirectives(t *testing.T) {
+	src := "example.com {\n\treverse_proxy {\n\t\tbad_one\n\t\tbad_two\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 2 {
+		t.Errorf("two unknown subdirectives: expected 2 diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+// --- freeform body: @name matcher should not warn ----------------------------
+
+func TestAnalyze_FreeformBody_MatcherNoWarning(t *testing.T) {
+	// basicauth is freeform (nil subdirectives); body is not validated at all.
+	src := "example.com {\n\tbasicauth {\n\t\t@admin ...\n\t}\n}\n"
+	if diags := analyze(src); len(diags) != 0 {
+		t.Errorf("matcher inside freeform body: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+// --- handle_path is a container directive ------------------------------------
+
+func TestAnalyze_HandlePathContainer_ValidContents(t *testing.T) {
+	src := "example.com {\n\thandle_path /static/* {\n\t\tfile_server\n\t}\n}\n"
+	if diags := analyze(src); len(diags) != 0 {
+		t.Errorf("handle_path with valid site directive: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_HandlePathContainer_UnknownDirective_Warning(t *testing.T) {
+	src := "example.com {\n\thandle_path /static/* {\n\t\tnot_a_directive\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 1 {
+		t.Fatalf("handle_path with unknown directive: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "not_a_directive") {
+		t.Errorf("expected message mentioning the unknown directive, got: %q", diags[0].Message)
+	}
+}
+
+// --- transport without known arg: no false positive --------------------------
+
+func TestAnalyze_TransportUnknownArg_BodyNotValidated(t *testing.T) {
+	// "transport" with no arg or unknown arg — body is not validated because
+	// the "transport:<arg>" key is absent from knownSubSubDirectives.
+	src := "example.com {\n\treverse_proxy localhost:8080 {\n\t\ttransport {\n\t\t\tanything_goes\n\t\t}\n\t}\n}\n"
+	diags := analyze(src)
+	for _, d := range diags {
+		if hasMsg([]protocol.Diagnostic{d}, "anything_goes") {
+			t.Errorf("body of transport (no arg) must not be validated, got: %q", d.Message)
+		}
+	}
+}
+
+// --- import inside transport http body ---------------------------------------
+
+func TestAnalyze_TransportHTTP_ImportDefinedSnippet_NoWarning(t *testing.T) {
+	// Snippet body uses a known subdirective-level token (header_up is in
+	// knownSubDirectiveParent) so it is accepted inside snippets.
+	src := "(tls_opts) {\n\theader_up X-Foo bar\n}\n" +
+		"example.com {\n\treverse_proxy localhost {\n\t\ttransport http {\n\t\t\timport tls_opts\n\t\t}\n\t}\n}\n"
+	if diags := analyze(src); len(diags) != 0 {
+		t.Errorf("import of defined snippet inside transport http: expected no diagnostics, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestAnalyze_TransportHTTP_ImportUndefinedSnippet_Warning(t *testing.T) {
+	src := "example.com {\n\treverse_proxy localhost {\n\t\ttransport http {\n\t\t\timport no_such\n\t\t}\n\t}\n}\n"
+	diags := analyze(src)
+	if len(diags) != 1 {
+		t.Fatalf("import of undefined snippet inside transport http: expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !hasMsg(diags, "no_such") {
+		t.Errorf("expected message mentioning snippet name, got: %q", diags[0].Message)
+	}
+}
+
 // --- KnownTopLevel / KnownGlobalOptions maps ----------------------------------
 
 func TestKnownTopLevel_NotEmpty(t *testing.T) {

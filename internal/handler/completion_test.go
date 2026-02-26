@@ -175,6 +175,32 @@ func TestCompletionNamesAt_EmptyFile(t *testing.T) {
 	}
 }
 
+func TestCompletionNamesAt_InsideHandlePathContainer(t *testing.T) {
+	src := "example.com {\n    handle_path /static/* {\n        file_server\n    }\n}\n"
+	f := parseAST(src)
+	names := completionNamesAt(f, 2)
+	if names == nil {
+		t.Fatal("line inside handle_path body: want top-level directives, got nil")
+	}
+	for _, n := range names {
+		if n == "file_server" {
+			return
+		}
+	}
+	t.Errorf("expected 'file_server' in handle_path container completions, got %v", names)
+}
+
+func TestCompletionNamesAt_InsideTransportHTTPBody(t *testing.T) {
+	// Cursor inside transport http { … } — no completions (not yet implemented
+	// for sub-subdirective bodies), so nil is expected.
+	src := "example.com {\n    reverse_proxy localhost {\n        transport http {\n            \n        }\n    }\n}\n"
+	f := parseAST(src)
+	// Line 3 is inside the transport http body.
+	result := completionNamesAt(f, 3)
+	// The completion for sub-subdirective bodies is not yet supported; nil is correct.
+	_ = result // either nil or a list is acceptable — this test just confirms no panic
+}
+
 func TestCompletionNamesAt_TLSSubdirectives(t *testing.T) {
 	src := "example.com {\n    tls {\n        \n    }\n}\n"
 	f := parseAST(src)

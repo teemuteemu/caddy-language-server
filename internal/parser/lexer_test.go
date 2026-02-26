@@ -176,3 +176,101 @@ func TestTokenize_MultipleAddresses(t *testing.T) {
 		t.Errorf("expected LBRACE, got %s", tokens[2].Type)
 	}
 }
+
+func TestTokenize_TabIndentedToken(t *testing.T) {
+	// A tab-indented directive: the column must reflect the position after the tab.
+	tokens := Tokenize("example.com {\n\tfile_server\n}")
+	// Expect: example.com, {, file_server, }, EOF
+	var fsToken *Token
+	for i := range tokens {
+		if tokens[i].Value == "file_server" {
+			fsToken = &tokens[i]
+			break
+		}
+	}
+	if fsToken == nil {
+		t.Fatal("file_server token not found")
+	}
+	if fsToken.Line != 1 {
+		t.Errorf("file_server line: want 1, got %d", fsToken.Line)
+	}
+	// Tab is 1 byte at offset 0; file_server starts at byte offset 1 → char 1.
+	if fsToken.Char != 1 {
+		t.Errorf("file_server char: want 1, got %d", fsToken.Char)
+	}
+}
+
+func TestTokenize_QuotedStringColumnOffset(t *testing.T) {
+	// "respond" starts at char 0; "hello world" (quoted) starts at char 8.
+	tokens := Tokenize(`respond "hello world"`)
+	if len(tokens) < 3 {
+		t.Fatalf("expected >=3 tokens, got %d", len(tokens))
+	}
+	if tokens[0].Value != "respond" || tokens[0].Char != 0 {
+		t.Errorf("respond: want char=0, got char=%d", tokens[0].Char)
+	}
+	if tokens[1].Type != STRING {
+		t.Errorf("second token: want STRING, got %s", tokens[1].Type)
+	}
+	if tokens[1].Char != 8 {
+		t.Errorf("quoted string: want char=8, got char=%d", tokens[1].Char)
+	}
+}
+
+func TestTokenize_DuplicateTokensOnOneLine(t *testing.T) {
+	// "foo foo" — two identical tokens; each must get the correct column.
+	tokens := Tokenize("foo foo")
+	if len(tokens) < 3 {
+		t.Fatalf("expected >=3 tokens, got %d: %v", len(tokens), tokens)
+	}
+	if tokens[0].Char != 0 {
+		t.Errorf("first foo: want char=0, got char=%d", tokens[0].Char)
+	}
+	if tokens[1].Char != 4 {
+		t.Errorf("second foo: want char=4, got char=%d", tokens[1].Char)
+	}
+}
+
+// ---- buildLineStarts --------------------------------------------------------
+
+func TestBuildLineStarts_NoNewlines(t *testing.T) {
+	starts := buildLineStarts("hello")
+	if len(starts) != 1 || starts[0] != 0 {
+		t.Errorf("no newlines: want [0], got %v", starts)
+	}
+}
+
+func TestBuildLineStarts_SingleNewline(t *testing.T) {
+	starts := buildLineStarts("foo\nbar")
+	if len(starts) != 2 || starts[0] != 0 || starts[1] != 4 {
+		t.Errorf("single newline: want [0 4], got %v", starts)
+	}
+}
+
+func TestBuildLineStarts_TrailingNewline(t *testing.T) {
+	starts := buildLineStarts("foo\n")
+	// The trailing newline creates an entry for an (empty) second line.
+	if len(starts) != 2 || starts[0] != 0 || starts[1] != 4 {
+		t.Errorf("trailing newline: want [0 4], got %v", starts)
+	}
+}
+
+func TestBuildLineStarts_Empty(t *testing.T) {
+	starts := buildLineStarts("")
+	if len(starts) != 1 || starts[0] != 0 {
+		t.Errorf("empty string: want [0], got %v", starts)
+	}
+}
+
+func TestBuildLineStarts_MultipleNewlines(t *testing.T) {
+	starts := buildLineStarts("a\nb\nc")
+	want := []int{0, 2, 4}
+	if len(starts) != len(want) {
+		t.Fatalf("want %v, got %v", want, starts)
+	}
+	for i, w := range want {
+		if starts[i] != w {
+			t.Errorf("starts[%d]: want %d, got %d", i, w, starts[i])
+		}
+	}
+}

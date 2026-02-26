@@ -145,6 +145,38 @@ var knownSubDirectives = map[string]map[string]bool{
 	"map":            nil,
 }
 
+// knownSubSubDirectives maps a "subdirective:arg" key to the set of valid
+// sub-subdirective names inside its body block.  The key is formed from the
+// subdirective name and its first argument (e.g. "transport:http").
+var knownSubSubDirectives = map[string]map[string]bool{
+	"transport:http": {
+		// buffering
+		"read_buffer": true, "write_buffer": true, "max_response_header": true,
+		// proxy
+		"proxy_protocol": true, "network_proxy": true,
+		// timeouts
+		"dial_timeout": true, "dial_fallback_delay": true,
+		"response_header_timeout": true, "expect_continue_timeout": true,
+		"read_timeout": true, "write_timeout": true,
+		// DNS
+		"resolvers": true,
+		// TLS
+		"tls": true, "tls_client_auth": true, "tls_insecure_skip_verify": true,
+		"tls_curves": true, "tls_timeout": true, "tls_trust_pool": true,
+		"tls_server_name": true, "tls_renegotiation": true, "tls_except_ports": true,
+		// keepalive
+		"keepalive": true, "keepalive_interval": true,
+		"keepalive_idle_conns": true, "keepalive_idle_conns_per_host": true,
+		// misc
+		"versions": true, "compression": true, "max_conns_per_host": true,
+	},
+	"transport:fastcgi": {
+		"root": true, "split": true, "env": true,
+		"resolve_root_symlink": true, "dial_timeout": true,
+		"read_timeout": true, "write_timeout": true, "capture_stderr": true,
+	},
+}
+
 // containerDirectives are top-level directives whose body contains site-level
 // directives (routing blocks). Their contents are validated the same way as a
 // site block rather than against a fixed subdirective set.
@@ -455,9 +487,49 @@ func (a *analyzer) analyzeDirectiveBody(parentName string, body []*parser.Direct
 				Source:   strPtr("caddy-ls"),
 				Message:  fmt.Sprintf("unknown subdirective %q for %q", subName, parentName),
 			})
+			continue
 		}
-		// Sub-subdirective bodies (e.g. transport http { … }) are not validated
-		// further to avoid false positives on module-specific syntax.
+		// Validate sub-subdirective bodies when we know the schema
+		// (e.g. transport http { … }, transport fastcgi { … }).
+		if len(sub.Body) > 0 {
+			subKey := subName
+			if len(sub.Args) > 0 {
+				subKey = subName + ":" + sub.Args[0].Token.Value
+			}
+			if subSubDirs, ok := knownSubSubDirectives[subKey]; ok {
+				diags = append(diags, a.analyzeNestedBody(subSubDirs, sub, parentName)...)
+			}
+		}
+	}
+	return diags
+}
+
+// analyzeNestedBody validates the body of a subdirective (e.g. "transport http")
+// against a known set of valid names.  parent is the subdirective node and
+// grandparentName is its containing directive (e.g. "reverse_proxy").
+func (a *analyzer) analyzeNestedBody(validDirs map[string]bool, parent *parser.Directive, grandparentName string) []protocol.Diagnostic {
+	qualifiedParent := parent.Name.Value
+	if len(parent.Args) > 0 {
+		qualifiedParent += " " + parent.Args[0].Token.Value
+	}
+	var diags []protocol.Diagnostic
+	for _, sub := range parent.Body {
+		subName := sub.Name.Value
+		if strings.HasPrefix(subName, "@") {
+			continue
+		}
+		if subName == "import" {
+			diags = append(diags, a.analyzeImport(sub)...)
+			continue
+		}
+		if !validDirs[subName] {
+			diags = append(diags, protocol.Diagnostic{
+				Range:    sub.Name.Range(),
+				Severity: severityWarning(),
+				Source:   strPtr("caddy-ls"),
+				Message:  fmt.Sprintf("unknown subdirective %q for %q %q", subName, grandparentName, qualifiedParent),
+			})
+		}
 	}
 	return diags
 }
