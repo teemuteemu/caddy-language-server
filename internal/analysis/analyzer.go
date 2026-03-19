@@ -139,7 +139,8 @@ var knownSubDirectives = map[string]map[string]bool{
 		"span": true,
 	},
 	// freeform bodies – structure is user-defined, not validated
-	"basicauth":      nil,
+	"basic_auth":     nil,
+	"basicauth":      nil, // legacy alias
 	"header":         nil,
 	"request_header": nil,
 	"map":            nil,
@@ -225,7 +226,8 @@ var KnownTopLevel = map[string]bool{
 	"encode":    true,
 	"templates": true,
 	// Auth
-	"basicauth": true,
+	"basic_auth": true,
+	"basicauth":  true, // legacy alias
 	// Logging
 	"log":        true,
 	"log_append": true,
