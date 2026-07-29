@@ -5,9 +5,9 @@ before:
     - go mod tidy
 
 builds:
-  - id: caddy-ls
-    main: ./cmd/caddy-ls
-    binary: caddy-ls
+  - id: caddy-language-server
+    main: .
+    binary: caddy-language-server
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     ldflags:

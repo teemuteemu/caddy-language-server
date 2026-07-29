@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"caddy-ls/internal/analysis"
-	"caddy-ls/internal/parser"
+	"github.com/teemuteemu/caddy-language-server/internal/analysis"
+	"github.com/teemuteemu/caddy-language-server/internal/parser"
 	"sort"
 	"strings"
 

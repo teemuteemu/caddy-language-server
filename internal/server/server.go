@@ -1,8 +1,8 @@
 package server
 
 import (
-	"caddy-ls/internal/document"
-	"caddy-ls/internal/handler"
+	"github.com/teemuteemu/caddy-language-server/internal/document"
+	"github.com/teemuteemu/caddy-language-server/internal/handler"
 
 	"github.com/tliron/commonlog"
 	_ "github.com/tliron/commonlog/simple"
