@@ -1,4 +1,4 @@
-# caddy-ls
+# caddy-language-server
 
 A language server for [Caddyfile](https://caddyserver.com/docs/caddyfile) configuration files.
 
@@ -10,9 +10,17 @@ A language server for [Caddyfile](https://caddyserver.com/docs/caddyfile) config
 
 The parser is built on Caddy's own tokenizer (`github.com/caddyserver/caddy/v2/caddyconfig/caddyfile`) so it stays in sync with Caddy's actual syntax rules.
 
+## Install
+
+```
+go install github.com/teemuteemu/caddy-language-server@latest
+```
+
+This puts a `caddy-language-server` binary in `$(go env GOPATH)/bin` — make sure that directory is on your `PATH`. Prebuilt binaries for Linux and macOS are also attached to each [release](https://github.com/teemuteemu/caddy-language-server/releases).
+
 ## Editor setup
 
-caddy-ls communicates over stdio using the Language Server Protocol (JSON-RPC 2.0). Point your editor's LSP client at the `caddy-ls` binary with no extra arguments.
+caddy-language-server communicates over stdio using the Language Server Protocol (JSON-RPC 2.0). Point your editor's LSP client at the `caddy-language-server` binary with no extra arguments.
 
 **Neovim (nvim-lspconfig)**
 
@@ -26,7 +34,7 @@ vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 
 require("lspconfig.configs").caddy_ls = {
   default_config = {
-    cmd = { "caddy-ls" },
+    cmd = { "caddy-language-server" },
     filetypes = { "caddy" },
     root_dir = require("lspconfig.util").root_pattern("Caddyfile"),
   },

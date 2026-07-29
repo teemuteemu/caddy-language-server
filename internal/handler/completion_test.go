@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"caddy-ls/internal/parser"
+	"github.com/teemuteemu/caddy-language-server/internal/parser"
 	"testing"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"

@@ -1,8 +1,9 @@
-module caddy-ls
+module github.com/teemuteemu/caddy-language-server
 
 go 1.25.0
 
 require (
+	github.com/caddyserver/caddy/v2 v2.11.1
 	github.com/tliron/commonlog v0.2.8
 	github.com/tliron/glsp v0.2.2
 )
@@ -10,7 +11,6 @@ require (
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/caddyserver/caddy/v2 v2.11.1 // indirect
 	github.com/caddyserver/certmagic v0.25.2 // indirect
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

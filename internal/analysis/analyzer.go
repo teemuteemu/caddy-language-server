@@ -1,7 +1,7 @@
 package analysis
 
 import (
-	"caddy-ls/internal/parser"
+	"github.com/teemuteemu/caddy-language-server/internal/parser"
 	"fmt"
 	"sort"
 	"strings"

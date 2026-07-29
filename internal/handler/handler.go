@@ -1,6 +1,6 @@
 package handler
 
-import "caddy-ls/internal/document"
+import "github.com/teemuteemu/caddy-language-server/internal/document"
 
 // Handler holds references to shared server state.
 type Handler struct {
