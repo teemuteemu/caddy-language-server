@@ -42,6 +42,36 @@ require("lspconfig.configs").caddy_ls = {
 require("lspconfig").caddy_ls.setup({})
 ```
 
+---
+
+> [!NOTE]
+> **Neovim 0.11+**
+>
+> The configuration API changed in Neovim 0.11. The `require("lspconfig").setup()` API is now deprecated in favor of the native `vim.lsp.config()` and `vim.lsp.enable()` APIs. The configuration above continues to work with older versions of Neovim.
+>
+> For Neovim 0.11+, use:
+>
+> ```lua
+> vim.filetype.add({
+>   filename = {
+>     Caddyfile = "caddy",
+>   },
+> })
+>
+> vim.lsp.config("caddy_ls", {
+>   cmd = { "caddy-language-server" },
+>   filetypes = { "caddy" },
+>   root_markers = { "Caddyfile" },
+> })
+>
+> vim.lsp.enable("caddy_ls")
+> ```
+>
+> This requires **Neovim 0.11 or newer**. See the [nvim-lspconfig migration instructions](https://github.com/neovim/nvim-lspconfig#migration-instructions) for more information.
+> 
+
+
+
 ## Development
 
 ```
